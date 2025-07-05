@@ -1,6 +1,11 @@
 [package]
 name = "kqt-rust"
+description = "Rust userspace implementation for kqt"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow = "1.0.98"
+clap = { version = "4.5.40", features = ["derive"] }
+quinn = "0.11.8"
+tun-tap = "0.1.4"
