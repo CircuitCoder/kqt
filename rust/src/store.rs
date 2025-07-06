@@ -51,7 +51,7 @@ impl Store {
         let specific = data.get(0..6).and_then(|s| {
             inner.linked.get(&MACAddr(s.try_into().unwrap()))
         });
-        println!("==> {:?}", data);
+        tracing::debug!("[SEND] {:?}", data);
         if let Some((_, conn)) = specific {
             if let Err(_e) = conn.send_datagram(data.to_owned().into()) {
                 // TODO: log
