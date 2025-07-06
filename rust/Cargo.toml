@@ -8,4 +8,5 @@ edition = "2024"
 anyhow = "1.0.98"
 clap = { version = "4.5.40", features = ["derive"] }
 quinn = "0.11.8"
-tun-tap = "0.1.4"
+tokio = { version = "1.46", features = ["net", "rt-multi-thread", "rt", "macros"] }
+tokio-tun = "0.13.2"
