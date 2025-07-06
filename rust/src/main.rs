@@ -47,6 +47,14 @@ struct Args {
     /// Idle timeout in seconds
     max_idle_timeout: u16,
 
+    #[arg(long, default_value = "65536")]
+    /// Send buffer size
+    send_buffer: usize,
+
+    #[arg(long, default_value = "65536")]
+    /// Recv buffer size
+    recv_buffer: usize,
+
     /// Connect to a remote node
     connect: Vec<SocketAddr>,
 }
@@ -81,6 +89,8 @@ async fn main() -> anyhow::Result<!> {
     transport.initial_mtu(args.intial_outer_mtu);
     transport.max_idle_timeout(Some(Duration::from_secs(args.max_idle_timeout as u64).try_into()?));
     transport.keep_alive_interval(Some(Duration::from_secs(args.keepalive as u64)));
+    transport.datagram_send_buffer_size(args.send_buffer);
+    transport.datagram_receive_buffer_size(Some(args.recv_buffer));
     let transport = Arc::new(transport);
 
     let mut endpoint = if let Some(listen) = args.listen {
@@ -192,7 +202,7 @@ async fn handle_connection(
     let ret = try {
         loop {
             let dgram = conn.read_datagram().await?;
-            tracing::debug!("[RECV] {:?}", dgram.as_ref());
+            tracing::debug!("[RECV] {}", dgram.len());
             if dgram.len() == 0 {
                 tracing::warn!("Empty datagram received");
                 continue;
