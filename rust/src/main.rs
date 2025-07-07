@@ -12,12 +12,24 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use crate::store::Store;
 
+fn parse_connect(s: &str) -> anyhow::Result<(String, SocketAddr)> {
+    let mut parts = s.splitn(2, ',');
+    let name = parts.next().ok_or_else(|| anyhow::anyhow!("Missing server SAN"))?.to_string();
+    let addr = parts.next().ok_or_else(|| anyhow::anyhow!("Missing address"))?;
+    let addr = addr.parse::<SocketAddr>()?;
+    Ok((name, addr))
+}
+
 #[derive(Parser)]
 #[command(version, about)]
 struct Args {
     /// Enable server mode
     #[arg(short, long)]
     listen: Option<SocketAddr>,
+
+    /// Connect to a remote node
+    #[arg(value_parser = parse_connect, help = "Connect to a remote node. Format: <SAN>,<address>")]
+    connect: Vec<(String, SocketAddr)>,
 
     #[arg(short, long, default_value = "/etc/kqt/key.pem")]
     /// Private key for this node
@@ -54,9 +66,6 @@ struct Args {
     #[arg(long)]
     /// Overrride recv buffer size
     recv_buffer: Option<usize>,
-
-    /// Connect to a remote node
-    connect: Vec<SocketAddr>,
 }
 
 #[tokio::main]
@@ -125,11 +134,12 @@ async fn main() -> anyhow::Result<!> {
 
     // Main loop
     // Handle client
-    for addr in args.connect {
+    for (name, addr) in args.connect {
         tokio::spawn(handle_target(
             endpoint.clone(),
             device.clone(),
             addr,
+            name,
             store.clone(),
         ));
     }
@@ -175,12 +185,12 @@ async fn handle_target(
     ep: Endpoint,
     device: Arc<tokio_tun::Tun>,
     addr: SocketAddr,
+    name: String,
     store: Store,
 ) -> ! {
     loop {
         let Err(err): anyhow::Result<!> = try {
-            // TODO: explicitly specify subject name
-            let conn = ep.connect(addr, "kqt")?;
+            let conn = ep.connect(addr, &name)?;
             handle_connection(conn, device.clone(), store.clone()).await?
         };
         tracing::error!("Outgoing connection to {} closed: {}", addr, err);
