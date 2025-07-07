@@ -53,15 +53,23 @@ impl Store {
         });
         tracing::debug!("[SEND] {}", data.len());
         if let Some((_, conn)) = specific {
-            if let Err(_e) = conn.send_datagram(data.to_owned().into()) {
-                // TODO: log
-            }
+            Self::send_to(data, conn);
         } else {
             for (_, conn) in inner.id.iter() {
-                if let Err(_e) = conn.send_datagram(data.to_owned().into()) {
-                    // TODO: log
-                }
+                Self::send_to(data, conn);
             }
+        }
+    }
+
+    fn send_to(data: &[u8], conn: &Connection) {
+        let cur_max_dgram_size = conn.max_datagram_size();
+        if cur_max_dgram_size.is_none() {
+            tracing::warn!("[SEND {}] Datagram disabled", conn.remote_address());
+        } else if cur_max_dgram_size.unwrap() < data.len() {
+            tracing::warn!("[SEND {}] Datagram size {} > current max size {}", conn.remote_address(), data.len(), cur_max_dgram_size.unwrap());
+        }
+        if let Err(e) = conn.send_datagram(data.to_owned().into()) {
+            tracing::warn!("[SEND {}] Failed: {}", conn.remote_address(), e);
         }
     }
 }

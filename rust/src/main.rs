@@ -35,7 +35,7 @@ struct Args {
     /// Name of the iface
     name: String,
 
-    #[arg(long, default_value = "1460")]
+    #[arg(long, default_value = "1200")]
     /// Initial outer connection MTU
     intial_outer_mtu: u16,
 
@@ -47,13 +47,13 @@ struct Args {
     /// Idle timeout in seconds
     max_idle_timeout: u16,
 
-    #[arg(long, default_value = "65536")]
-    /// Send buffer size
-    send_buffer: usize,
+    #[arg(long)]
+    /// Override send buffer size
+    send_buffer: Option<usize>,
 
-    #[arg(long, default_value = "65536")]
-    /// Recv buffer size
-    recv_buffer: usize,
+    #[arg(long)]
+    /// Overrride recv buffer size
+    recv_buffer: Option<usize>,
 
     /// Connect to a remote node
     connect: Vec<SocketAddr>,
@@ -86,11 +86,16 @@ async fn main() -> anyhow::Result<!> {
     let root_store = Arc::new(root_store);
 
     let mut transport = quinn::TransportConfig::default();
+    // TODO: discovery config
     transport.initial_mtu(args.intial_outer_mtu);
     transport.max_idle_timeout(Some(Duration::from_secs(args.max_idle_timeout as u64).try_into()?));
     transport.keep_alive_interval(Some(Duration::from_secs(args.keepalive as u64)));
-    transport.datagram_send_buffer_size(args.send_buffer);
-    transport.datagram_receive_buffer_size(Some(args.recv_buffer));
+    if let Some(s) = args.send_buffer {
+        transport.datagram_send_buffer_size(s);
+    }
+    if let Some(s) = args.recv_buffer {
+        transport.datagram_receive_buffer_size(Some(s));
+    }
     let transport = Arc::new(transport);
 
     let mut endpoint = if let Some(listen) = args.listen {
@@ -140,7 +145,7 @@ async fn main() -> anyhow::Result<!> {
             tracing::error!("MTU is too large: {}. Maximum supported MTU is 65536 bytes.", mtu);
             std::process::exit(1);
         }
-        buf.resize(mtu as usize, 0);
+        buf.resize(mtu as usize + 18, 0);
         let len = device.recv(&mut buf).await?;
         store.send(&buf[..len]).await;
     }
