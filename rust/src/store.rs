@@ -51,7 +51,7 @@ impl Store {
         let specific = data.get(0..6).and_then(|s| {
             inner.linked.get(&MACAddr(s.try_into().unwrap()))
         });
-        tracing::debug!("[SEND] {}", data.len());
+        // tracing::debug!("[SEND] {}", data.len());
         if let Some((_, conn)) = specific {
             Self::send_to(data, conn);
         } else {

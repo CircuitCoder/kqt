@@ -207,7 +207,7 @@ async fn handle_connection(
     let ret = try {
         loop {
             let dgram = conn.read_datagram().await?;
-            tracing::debug!("[RECV] {}", dgram.len());
+            // tracing::debug!("[RECV] {}", dgram.len());
             if dgram.len() == 0 {
                 tracing::warn!("Empty datagram received");
                 continue;
