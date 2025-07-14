@@ -10,7 +10,6 @@ struct StoreInner {
     linked: HashMap<MACAddr, (usize, Connection)>,
     id: HashMap<usize, Connection>,
     counter: usize,
-    
 }
 
 #[derive(Clone)]
@@ -48,9 +47,9 @@ impl Store {
     pub async fn send(&self, data: &[u8]) {
         // Ignore failed connections
         let inner = self.0.read().await;
-        let specific = data.get(0..6).and_then(|s| {
-            inner.linked.get(&MACAddr(s.try_into().unwrap()))
-        });
+        let specific = data
+            .get(0..6)
+            .and_then(|s| inner.linked.get(&MACAddr(s.try_into().unwrap())));
         // tracing::debug!("[SEND] {}", data.len());
         if let Some((_, conn)) = specific {
             Self::send_to(data, conn);
@@ -66,7 +65,12 @@ impl Store {
         if cur_max_dgram_size.is_none() {
             tracing::warn!("[SEND {}] Datagram disabled", conn.remote_address());
         } else if cur_max_dgram_size.unwrap() < data.len() {
-            tracing::warn!("[SEND {}] Datagram size {} > current max size {}", conn.remote_address(), data.len(), cur_max_dgram_size.unwrap());
+            tracing::warn!(
+                "[SEND {}] Datagram size {} > current max size {}",
+                conn.remote_address(),
+                data.len(),
+                cur_max_dgram_size.unwrap()
+            );
         }
         if let Err(e) = conn.send_datagram(data.to_owned().into()) {
             tracing::warn!("[SEND {}] Failed: {}", conn.remote_address(), e);

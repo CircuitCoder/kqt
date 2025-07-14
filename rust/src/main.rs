@@ -4,9 +4,14 @@ mod store;
 
 use clap::Parser;
 use quinn::{
-    congestion::BbrConfig, crypto::rustls::{QuicClientConfig, QuicServerConfig}, rustls::{
-        self, pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer}, version::TLS13, RootCertStore
-    }, Connecting, Endpoint
+    Connecting, Endpoint,
+    congestion::BbrConfig,
+    crypto::rustls::{QuicClientConfig, QuicServerConfig},
+    rustls::{
+        self, RootCertStore,
+        pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
+        version::TLS13,
+    },
 };
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
@@ -14,8 +19,13 @@ use crate::store::Store;
 
 fn parse_connect(s: &str) -> anyhow::Result<(String, SocketAddr)> {
     let mut parts = s.splitn(2, ',');
-    let name = parts.next().ok_or_else(|| anyhow::anyhow!("Missing server SAN"))?.to_string();
-    let addr = parts.next().ok_or_else(|| anyhow::anyhow!("Missing address"))?;
+    let name = parts
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("Missing server SAN"))?
+        .to_string();
+    let addr = parts
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("Missing address"))?;
     let addr = addr.parse::<SocketAddr>()?;
     Ok((name, addr))
 }
@@ -97,7 +107,9 @@ async fn main() -> anyhow::Result<!> {
     let mut transport = quinn::TransportConfig::default();
     // TODO: discovery config
     transport.initial_mtu(args.initial_outer_mtu);
-    transport.max_idle_timeout(Some(Duration::from_secs(args.max_idle_timeout as u64).try_into()?));
+    transport.max_idle_timeout(Some(
+        Duration::from_secs(args.max_idle_timeout as u64).try_into()?,
+    ));
     transport.keep_alive_interval(Some(Duration::from_secs(args.keepalive as u64)));
     transport.congestion_controller_factory(Arc::new(BbrConfig::default()));
     if let Some(s) = args.send_buffer {
@@ -109,7 +121,13 @@ async fn main() -> anyhow::Result<!> {
     let transport = Arc::new(transport);
 
     let mut endpoint = if let Some(listen) = args.listen {
-        create_server_endpoint(listen, root_store.clone(), chain.clone(), pk.clone_key(), transport.clone())?
+        create_server_endpoint(
+            listen,
+            root_store.clone(),
+            chain.clone(),
+            pk.clone_key(),
+            transport.clone(),
+        )?
     } else {
         quinn::Endpoint::client((std::net::Ipv6Addr::UNSPECIFIED, 0).into())?
     };
@@ -119,16 +137,22 @@ async fn main() -> anyhow::Result<!> {
         .with_client_auth_cert(chain.clone(), pk.clone_key())?;
     client_crypto.alpn_protocols = vec![b"kqt/0.1".to_vec()];
     let client_crypto = Arc::new(client_crypto);
-    let mut client_cfg: quinn::ClientConfig = quinn::ClientConfig::new(Arc::new(QuicClientConfig::try_from(client_crypto)?));
+    let mut client_cfg: quinn::ClientConfig =
+        quinn::ClientConfig::new(Arc::new(QuicClientConfig::try_from(client_crypto)?));
     client_cfg.transport_config(transport);
     endpoint.set_default_client_config(client_cfg);
 
     tracing::debug!("Endpoints created");
 
-    let device = Arc::new(tokio_tun::TunBuilder::new()
-        .name(&args.name)
-        .tap()
-        .up().build()?.pop().unwrap());
+    let device = Arc::new(
+        tokio_tun::TunBuilder::new()
+            .name(&args.name)
+            .tap()
+            .up()
+            .build()?
+            .pop()
+            .unwrap(),
+    );
     let store = Store::new();
 
     tracing::debug!("Device created");
@@ -153,7 +177,10 @@ async fn main() -> anyhow::Result<!> {
     loop {
         let mtu = device.mtu()?;
         if mtu > 65536 {
-            tracing::error!("MTU is too large: {}. Maximum supported MTU is 65536 bytes.", mtu);
+            tracing::error!(
+                "MTU is too large: {}. Maximum supported MTU is 65536 bytes.",
+                mtu
+            );
             std::process::exit(1);
         }
         buf.resize(mtu as usize + 18, 0);
@@ -226,7 +253,11 @@ async fn handle_connection(
             // Simply forward to tap
             let written = device.send(dgram.as_ref()).await?;
             if written != dgram.len() {
-                tracing::warn!("Partial write to tap device, {} instead of {}", written, dgram.len());
+                tracing::warn!(
+                    "Partial write to tap device, {} instead of {}",
+                    written,
+                    dgram.len()
+                );
             }
 
             // Also, parse the source MAC address
