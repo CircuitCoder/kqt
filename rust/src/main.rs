@@ -4,7 +4,7 @@ mod store;
 
 use clap::Parser;
 use quinn::{
-    crypto::rustls::{QuicClientConfig, QuicServerConfig}, rustls::{
+    congestion::BbrConfig, crypto::rustls::{QuicClientConfig, QuicServerConfig}, rustls::{
         self, pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer}, version::TLS13, RootCertStore
     }, Connecting, Endpoint
 };
@@ -49,7 +49,7 @@ struct Args {
 
     #[arg(long, default_value = "1200")]
     /// Initial outer connection MTU
-    intial_outer_mtu: u16,
+    initial_outer_mtu: u16,
 
     #[arg(long, default_value = "25")]
     /// Keepalive interval in seconds
@@ -96,9 +96,10 @@ async fn main() -> anyhow::Result<!> {
 
     let mut transport = quinn::TransportConfig::default();
     // TODO: discovery config
-    transport.initial_mtu(args.intial_outer_mtu);
+    transport.initial_mtu(args.initial_outer_mtu);
     transport.max_idle_timeout(Some(Duration::from_secs(args.max_idle_timeout as u64).try_into()?));
     transport.keep_alive_interval(Some(Duration::from_secs(args.keepalive as u64)));
+    transport.congestion_controller_factory(Arc::new(BbrConfig::default()));
     if let Some(s) = args.send_buffer {
         transport.datagram_send_buffer_size(s);
     }
