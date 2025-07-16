@@ -1,0 +1,2 @@
+obj-m := kqt.o
+kqt-y := kqt_mod.o
