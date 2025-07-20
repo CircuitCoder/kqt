@@ -11,6 +11,9 @@
 #include <net/rtnetlink.h>
 #include <net/handshake.h>
 #include <net/sock.h>
+#include <net/genetlink.h>
+
+#include "kqt.h"
 
 static const char KQT_ALPN[] = "kqt/0.1";
 static const int KQT_ALPN_LEN = sizeof(KQT_ALPN) - 1;
@@ -22,6 +25,7 @@ enum kqt_peer_state {
 };
 
 struct kqt_peer {
+  struct kqt_device *kqt;
   struct socket *sock;
   enum kqt_peer_state state;
   struct list_head list;
@@ -64,6 +68,20 @@ int kqt_peer_handshake(struct socket *sock) {
   return handshake_done.status;
 }
 
+static void kqt_peer_recv(struct sock* sk) {
+  struct kqt_peer *peer = (struct kqt_peer *)sk->sk_user_data;
+  struct socket *sock = peer->sock;
+  struct msghdr msg = {0};
+  struct kvec iov;
+  int err = kernel_recvmsg(sock, &msg, &iov, 1, 0, MSG_DONTWAIT);
+  if (err) {
+    if (err != -EAGAIN && err != -EWOULDBLOCK)
+      pr_err("kqt: recvmsg failed: %d\n", err);
+    return;
+  }
+  // FIXME: napi receive
+}
+
 int kqt_peer_open(struct kqt_peer *peer, struct sockaddr_in remote) {
   struct socket *sock;
   int err;
@@ -89,6 +107,9 @@ int kqt_peer_open(struct kqt_peer *peer, struct sockaddr_in remote) {
     goto free_sock;
   }
   peer->sock = sock;
+  sock->sk->sk_user_data = peer;
+  wmb();
+  sock->sk->sk_data_ready = kqt_peer_recv;
   wmb();
   peer->state = KQT_PEER_ESTABLISHED;
   return 0;
@@ -99,13 +120,13 @@ free_sock:
 }
 
 struct kqt_device {
+  struct net_device *netdev;
   struct list_head peers;
 };
 
 static int kqt_peer_send(struct kqt_peer *peer, struct sk_buff *skb) {
   struct msghdr msg = {0};
   struct kvec iov;
-  int err;
 
   if (!peer->sock) {
     pr_err("kqt: peer socket is NULL\n");
@@ -183,6 +204,28 @@ static struct rtnl_link_ops kqt_link_ops = {
   .newlink = kqt_netdev_newlink,
 };
 
+// GENL
+
+static const struct genl_ops kqt_genl_ops[] = {
+  {
+    .cmd = KQT_GET_DEVICE,
+    .flags = GENL_ADMIN_PERM,
+  },
+  {
+    .cmd = KQT_SET_DEVICE,
+    .flags = GENL_ADMIN_PERM,
+  },
+};
+
+static struct genl_family kqt_genl_family = {
+  .ops = kqt_genl_ops,
+  .n_ops = ARRAY_SIZE(kqt_genl_ops),
+  .name = KQT_GENL_NAME,
+  .version = KQT_GENL_VERSION,
+  .module = THIS_MODULE,
+  .netnsok = true,
+};
+
 static int __init kqt_module_init(void) {
   int ret;
 
@@ -201,4 +244,4 @@ static void __exit kqt_module_exit(void) {
 module_init(kqt_module_init);
 module_exit(kqt_module_exit);
 
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("Dual MIT/GPL");
