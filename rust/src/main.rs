@@ -1,6 +1,7 @@
 #![feature(never_type, try_blocks)]
 
 mod store;
+mod cert;
 
 use clap::Parser;
 use quinn::{
