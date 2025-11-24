@@ -9,6 +9,7 @@ use quinn::rustls::{
 };
 use x509_cert::{
     der::{Decode, Encode, asn1::BitString},
+    ext::{AsExtension, pkix::BasicConstraints},
     spki::DynSignatureAlgorithmIdentifier,
 };
 
@@ -32,6 +33,13 @@ pub fn recover_tbs_cert(
     use x509_cert::spki::*;
     use x509_cert::time::*;
 
+    let bc_ext = BasicConstraints {
+        ca: true,
+        path_len_constraint: None,
+    };
+    let subject = RdnSequence::from_str(&format!("CN={name}.{suffix}"))?;
+    let bc_ext = bc_ext.to_extension(&subject, &[])?;
+
     let tbs_cert = x509_cert::certificate::TbsCertificate {
         version: Version::V3,
         serial_number: SerialNumber::new(&pk_bytes[0..19])?,
@@ -43,12 +51,12 @@ pub fn recover_tbs_cert(
             )?),
             not_after: Time::INFINITY,
         },
-        subject: RdnSequence::from_str(&format!("CN={name}.{suffix}"))?,
+        subject,
         subject_public_key_info: SubjectPublicKeyInfo::from_key(raw_pk)?,
 
         issuer_unique_id: Some(BitString::from_bytes(raw_issuer.to_bytes().as_slice())?),
         subject_unique_id: Some(BitString::from_bytes(pk_bytes.as_slice())?),
-        extensions: None,
+        extensions: Some(vec![bc_ext]),
     };
 
     Ok(tbs_cert)
@@ -114,10 +122,7 @@ pub struct ParsedKeypair {
 }
 
 impl ParsedKeypair {
-    pub fn try_into_rustls(
-        self,
-        suffix: &str,
-    ) -> anyhow::Result<(CertificateDer<'static>, PrivateKeyDer<'static>)> {
+    pub fn try_to_cert(&self, suffix: &str) -> anyhow::Result<x509_cert::certificate::Certificate> {
         let pk = self.sk.verifying_key();
         let cert = match self.sig {
             Some((issuer, sig)) => recover_cert(pk, issuer, sig, suffix)?,
@@ -131,6 +136,14 @@ impl ParsedKeypair {
                 }
             }
         };
+        Ok(cert)
+    }
+
+    pub fn try_into_rustls(
+        self,
+        suffix: &str,
+    ) -> anyhow::Result<(CertificateDer<'static>, PrivateKeyDer<'static>)> {
+        let cert = self.try_to_cert(suffix)?;
         let cert_der = cert.to_der()?;
         let cert_der = CertificateDer::from(cert_der);
 
