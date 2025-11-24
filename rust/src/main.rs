@@ -8,18 +8,11 @@ use quinn::{
     Connecting, Endpoint,
     congestion::BbrConfig,
     crypto::rustls::{QuicClientConfig, QuicServerConfig},
-    rustls::{
-        self, RootCertStore,
-        pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
-        version::TLS13,
-    },
+    rustls::{self, version::TLS13},
 };
-use std::{collections::HashSet, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Duration};
 
-use crate::{
-    cert::{LiteCertVerifier, ParsedSignedKeypair},
-    store::Store,
-};
+use crate::{cert::LiteCertVerifier, store::Store};
 
 const KQT_PROTO_VERSION: &'static [u8] = b"kqt/0.1";
 
@@ -100,7 +93,7 @@ async fn main() -> anyhow::Result<!> {
         .collect::<Result<HashSet<_>, _>>()?;
     let verifier = cert::LiteCertVerifier::new(args.suffix.clone(), trusts);
     let verifier = Arc::new(verifier);
-    let kp = ParsedSignedKeypair::try_from(args.keypair.as_str())?;
+    let kp = cert::ParsedKeypair::try_from(args.keypair.as_str())?;
 
     let mut transport = quinn::TransportConfig::default();
     // TODO: discovery config
@@ -130,7 +123,7 @@ async fn main() -> anyhow::Result<!> {
         quinn::Endpoint::client((std::net::Ipv6Addr::UNSPECIFIED, 0).into())?
     };
 
-    let (cert, sk) = kp.try_to_rustls(&args.suffix)?;
+    let (cert, sk) = kp.try_into_rustls(&args.suffix)?;
 
     let mut client_crypto = rustls::ClientConfig::builder_with_protocol_versions(&[&TLS13])
         .dangerous()
@@ -194,11 +187,11 @@ async fn main() -> anyhow::Result<!> {
 fn create_server_endpoint(
     listen: SocketAddr,
     verifier: Arc<LiteCertVerifier>,
-    kp: ParsedSignedKeypair,
+    kp: cert::ParsedKeypair,
     suffix: &str,
     transport: Arc<quinn::TransportConfig>,
 ) -> anyhow::Result<Endpoint> {
-    let (cert, key) = kp.try_to_rustls(suffix)?;
+    let (cert, key) = kp.try_into_rustls(suffix)?;
     let mut server_crypto = rustls::ServerConfig::builder_with_protocol_versions(&[&TLS13])
         .with_client_cert_verifier(verifier)
         .with_single_cert(vec![cert], key)?;

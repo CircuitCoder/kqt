@@ -1,4 +1,4 @@
-use std::{collections::HashSet, io::Read, str::FromStr};
+use std::{collections::HashSet, str::FromStr};
 
 use base64::Engine;
 use ed25519_dalek::Signer;
@@ -78,40 +78,23 @@ pub fn recover_cert(
         signature_algorithm: raw_issuer.signature_algorithm_identifier()?,
         signature: BitString::from_bytes(&signautre.to_bytes())?,
     };
+    // FIXME: verify?
 
     Ok(cert)
 }
 
 /// Parsing
 /// Formats are:
-/// - Raw private key: k.<base64>
-/// - Raw public key used in trust anchor: t.<base64>
-/// - Signed keypair: c.<base64 private key>.<base64 issuer pk>.<base64 signature>
-
-pub struct ParsedPrivateKey(pub ed25519_dalek::SigningKey);
-impl<'a> TryFrom<&'a str> for ParsedPrivateKey {
-    type Error = anyhow::Error;
-    fn try_from(value: &'a str) -> Result<Self, Self::Error> {
-        if !value.starts_with("k.") {
-            return Err(anyhow::anyhow!("Private key must start with 'k.'"));
-        }
-        let encoded = &value[2..];
-        let mut decoded: [u8; 32] = [0; 32];
-        let len = base64::engine::general_purpose::STANDARD.decode_slice(encoded, &mut decoded)?;
-        if len != 32 {
-            return Err(anyhow::anyhow!("Invalid private key length"));
-        }
-        let sk = ed25519_dalek::SigningKey::from_bytes(&decoded);
-        Ok(ParsedPrivateKey(sk))
-    }
-}
+/// - Raw public key used in trust anchor: p.<base64>
+/// - Signed keypair: s.<base64 private key>.<base64 issuer pk>.<base64 signature>
+/// - Self-signed keypair: s.<base64 private key>
 
 pub struct ParsedTrustAnchor(pub ed25519_dalek::VerifyingKey);
 impl<'a> TryFrom<&'a str> for ParsedTrustAnchor {
     type Error = anyhow::Error;
     fn try_from(value: &'a str) -> Result<Self, Self::Error> {
-        if !value.starts_with("t.") {
-            return Err(anyhow::anyhow!("Trust anchor must start with 't.'"));
+        if !value.starts_with("p.") {
+            return Err(anyhow::anyhow!("Trust anchor must start with 'p.'"));
         }
         let encoded = &value[2..];
         let mut decoded: [u8; 32] = [0; 32];
@@ -125,19 +108,29 @@ impl<'a> TryFrom<&'a str> for ParsedTrustAnchor {
 }
 
 #[derive(Clone)]
-pub struct ParsedSignedKeypair {
+pub struct ParsedKeypair {
     pub sk: ed25519_dalek::SigningKey,
-    pub issuer: ed25519_dalek::VerifyingKey,
-    pub sig: ed25519_dalek::Signature,
+    pub sig: Option<(ed25519_dalek::VerifyingKey, ed25519_dalek::Signature)>,
 }
 
-impl ParsedSignedKeypair {
-    pub fn try_to_rustls(
-        &self,
+impl ParsedKeypair {
+    pub fn try_into_rustls(
+        self,
         suffix: &str,
     ) -> anyhow::Result<(CertificateDer<'static>, PrivateKeyDer<'static>)> {
-        let pk = ed25519_dalek::VerifyingKey::from(&self.sk);
-        let cert = recover_cert(pk, self.issuer.clone(), self.sig.clone(), suffix)?;
+        let pk = self.sk.verifying_key();
+        let cert = match self.sig {
+            Some((issuer, sig)) => recover_cert(pk, issuer, sig, suffix)?,
+            None => {
+                let tbs_cert = recover_tbs_cert(pk, pk, suffix)?;
+                let sig = sign_cert(&tbs_cert, &self.sk)?;
+                x509_cert::certificate::Certificate {
+                    tbs_certificate: tbs_cert,
+                    signature_algorithm: pk.signature_algorithm_identifier()?,
+                    signature: BitString::from_bytes(&sig.to_bytes())?,
+                }
+            }
+        };
         let cert_der = cert.to_der()?;
         let cert_der = CertificateDer::from(cert_der);
 
@@ -148,32 +141,42 @@ impl ParsedSignedKeypair {
     }
 }
 
-impl<'a> TryFrom<&'a str> for ParsedSignedKeypair {
+impl<'a> TryFrom<&'a str> for ParsedKeypair {
     type Error = anyhow::Error;
     fn try_from(value: &'a str) -> Result<Self, Self::Error> {
-        if !value.starts_with("c.") {
-            return Err(anyhow::anyhow!("Signed keypair must start with 'c.'"));
+        if !value.starts_with("s.") {
+            return Err(anyhow::anyhow!("Keypair must start with 's.'"));
         }
         let parts: Vec<&str> = value[2..].split('.').collect();
-        if parts.len() != 3 {
-            return Err(anyhow::anyhow!("Signed keypair must have three parts"));
+        if parts.len() != 1 && parts.len() != 3 {
+            return Err(anyhow::anyhow!("Keypair must be self-signed or signed"));
         }
         let mut decoded_key: [u8; 32] = [0; 32];
-        let mut decoded_issuer: [u8; 32] = [0; 32];
-        let mut decoded_sig: [u8; 64] = [0; 64];
         let len_key =
             base64::engine::general_purpose::STANDARD.decode_slice(parts[0], &mut decoded_key)?;
-        let len_issuer = base64::engine::general_purpose::STANDARD
-            .decode_slice(parts[1], &mut decoded_issuer)?;
-        let len_sig =
-            base64::engine::general_purpose::STANDARD.decode_slice(parts[2], &mut decoded_sig)?;
-        if len_key != 32 || len_issuer != 32 || len_sig != 64 {
-            return Err(anyhow::anyhow!("Invalid signed keypair length"));
+        if len_key != 32 {
+            return Err(anyhow::anyhow!("Invalid length of private key"));
         }
         let sk = ed25519_dalek::SigningKey::from_bytes(&decoded_key);
-        let issuer = ed25519_dalek::VerifyingKey::from_bytes(&decoded_issuer)?;
-        let sig = ed25519_dalek::Signature::from_bytes(&decoded_sig);
-        Ok(ParsedSignedKeypair { sk, issuer, sig })
+
+        let mut sig = None;
+
+        if parts.len() > 1 {
+            let mut decoded_issuer: [u8; 32] = [0; 32];
+            let mut decoded_sig: [u8; 64] = [0; 64];
+            let len_issuer = base64::engine::general_purpose::STANDARD
+                .decode_slice(parts[1], &mut decoded_issuer)?;
+            let len_sig = base64::engine::general_purpose::STANDARD
+                .decode_slice(parts[2], &mut decoded_sig)?;
+            if len_issuer != 32 || len_sig != 64 {
+                return Err(anyhow::anyhow!("Invalid length of issuer or signature"));
+            }
+            sig = Some((
+                ed25519_dalek::VerifyingKey::from_bytes(&decoded_issuer)?,
+                ed25519_dalek::Signature::from_bytes(&decoded_sig),
+            ));
+        }
+        Ok(ParsedKeypair { sk, sig })
     }
 }
 
