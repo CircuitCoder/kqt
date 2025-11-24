@@ -1,45 +1,53 @@
-use std::{collections::HashSet, str::FromStr};
+use std::{collections::HashSet, io::Read, str::FromStr};
 
 use base64::Engine;
 use ed25519_dalek::Signer;
-use quinn::rustls::client::danger::*;
-use x509_cert::der::{Encode, asn1::BitString};
+use quinn::rustls::{
+    client::danger::*,
+    pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
+    server::danger::{ClientCertVerified, ClientCertVerifier},
+};
+use x509_cert::{
+    der::{Decode, Encode, asn1::BitString},
+    spki::DynSignatureAlgorithmIdentifier,
+};
 
 pub fn recover_tbs_cert(
-    raw_key: ed25519_dalek::SigningKey,
+    raw_pk: ed25519_dalek::VerifyingKey,
     raw_issuer: ed25519_dalek::VerifyingKey,
     suffix: &str,
 ) -> anyhow::Result<x509_cert::certificate::TbsCertificate> {
     // Subject is derived from the public key. Since the public key is only 32B long,
     // which is exactly the same length as SHA256, we just use the public key itself.
-    let public_key = ed25519_dalek::VerifyingKey::from(&raw_key);
 
-    let public_key_bytes = public_key.to_bytes();
-    let name = hex::encode(public_key_bytes);
+    let pk_bytes = raw_pk.to_bytes();
+    let name = hex::encode(pk_bytes);
 
     let issuer_name = hex::encode(raw_issuer.to_bytes());
 
     use x509_cert::certificate::*;
-    use x509_cert::serial_number::*;
-    use x509_cert::name::*;
-    use x509_cert::time::*;
-    use x509_cert::spki::*;
     use x509_cert::der::asn1::GeneralizedTime;
+    use x509_cert::name::*;
+    use x509_cert::serial_number::*;
+    use x509_cert::spki::*;
+    use x509_cert::time::*;
 
     let tbs_cert = x509_cert::certificate::TbsCertificate {
         version: Version::V3,
-        serial_number: SerialNumber::new(&public_key_bytes[0..19])?,
-        signature: public_key.signature_algorithm_identifier()?,
+        serial_number: SerialNumber::new(&pk_bytes[0..19])?,
+        signature: raw_pk.signature_algorithm_identifier()?,
         issuer: RdnSequence::from_str(&format!("CN={issuer_name}.{suffix}"))?,
         validity: Validity {
-            not_before: Time::GeneralTime(GeneralizedTime::from_unix_duration(std::time::Duration::new(0, 0))?),
+            not_before: Time::GeneralTime(GeneralizedTime::from_unix_duration(
+                std::time::Duration::new(0, 0),
+            )?),
             not_after: Time::INFINITY,
         },
         subject: RdnSequence::from_str(&format!("CN={name}.{suffix}"))?,
-        subject_public_key_info: SubjectPublicKeyInfo::from_key(raw_key.verifying_key())?,
+        subject_public_key_info: SubjectPublicKeyInfo::from_key(raw_pk)?,
 
-        issuer_unique_id: None,
-        subject_unique_id: None,
+        issuer_unique_id: Some(BitString::from_bytes(raw_issuer.to_bytes().as_slice())?),
+        subject_unique_id: Some(BitString::from_bytes(pk_bytes.as_slice())?),
         extensions: None,
     };
 
@@ -57,14 +65,14 @@ pub fn sign_cert(
 }
 
 pub fn recover_cert(
-    raw_key: ed25519_dalek::SigningKey,
+    raw_pk: ed25519_dalek::VerifyingKey,
     raw_issuer: ed25519_dalek::VerifyingKey,
     signautre: ed25519_dalek::Signature,
     suffix: &str,
 ) -> anyhow::Result<x509_cert::certificate::Certificate> {
     use x509_cert::spki::*;
 
-    let tbs_cert = recover_tbs_cert(raw_key, raw_issuer, suffix)?;
+    let tbs_cert = recover_tbs_cert(raw_pk, raw_issuer, suffix)?;
     let cert = x509_cert::certificate::Certificate {
         tbs_certificate: tbs_cert,
         signature_algorithm: raw_issuer.signature_algorithm_identifier()?,
@@ -78,7 +86,7 @@ pub fn recover_cert(
 /// Formats are:
 /// - Raw private key: k.<base64>
 /// - Raw public key used in trust anchor: t.<base64>
-/// - Signed keypair: c.<base64 private key>.<base64 signature>
+/// - Signed keypair: c.<base64 private key>.<base64 issuer pk>.<base64 signature>
 
 pub struct ParsedPrivateKey(pub ed25519_dalek::SigningKey);
 impl<'a> TryFrom<&'a str> for ParsedPrivateKey {
@@ -116,14 +124,67 @@ impl<'a> TryFrom<&'a str> for ParsedTrustAnchor {
     }
 }
 
+#[derive(Clone)]
+pub struct ParsedSignedKeypair {
+    pub sk: ed25519_dalek::SigningKey,
+    pub issuer: ed25519_dalek::VerifyingKey,
+    pub sig: ed25519_dalek::Signature,
+}
+
+impl ParsedSignedKeypair {
+    pub fn try_to_rustls(
+        &self,
+        suffix: &str,
+    ) -> anyhow::Result<(CertificateDer<'static>, PrivateKeyDer<'static>)> {
+        let pk = ed25519_dalek::VerifyingKey::from(&self.sk);
+        let cert = recover_cert(pk, self.issuer.clone(), self.sig.clone(), suffix)?;
+        let cert_der = cert.to_der()?;
+        let cert_der = CertificateDer::from(cert_der);
+
+        use ed25519_dalek::pkcs8::EncodePrivateKey;
+        let key_der = self.sk.to_pkcs8_der()?;
+        let key_der = PrivatePkcs8KeyDer::from(key_der.as_bytes().to_vec());
+        Ok((cert_der, key_der.into()))
+    }
+}
+
+impl<'a> TryFrom<&'a str> for ParsedSignedKeypair {
+    type Error = anyhow::Error;
+    fn try_from(value: &'a str) -> Result<Self, Self::Error> {
+        if !value.starts_with("c.") {
+            return Err(anyhow::anyhow!("Signed keypair must start with 'c.'"));
+        }
+        let parts: Vec<&str> = value[2..].split('.').collect();
+        if parts.len() != 3 {
+            return Err(anyhow::anyhow!("Signed keypair must have three parts"));
+        }
+        let mut decoded_key: [u8; 32] = [0; 32];
+        let mut decoded_issuer: [u8; 32] = [0; 32];
+        let mut decoded_sig: [u8; 64] = [0; 64];
+        let len_key =
+            base64::engine::general_purpose::STANDARD.decode_slice(parts[0], &mut decoded_key)?;
+        let len_issuer = base64::engine::general_purpose::STANDARD
+            .decode_slice(parts[1], &mut decoded_issuer)?;
+        let len_sig =
+            base64::engine::general_purpose::STANDARD.decode_slice(parts[2], &mut decoded_sig)?;
+        if len_key != 32 || len_issuer != 32 || len_sig != 64 {
+            return Err(anyhow::anyhow!("Invalid signed keypair length"));
+        }
+        let sk = ed25519_dalek::SigningKey::from_bytes(&decoded_key);
+        let issuer = ed25519_dalek::VerifyingKey::from_bytes(&decoded_issuer)?;
+        let sig = ed25519_dalek::Signature::from_bytes(&decoded_sig);
+        Ok(ParsedSignedKeypair { sk, issuer, sig })
+    }
+}
+
 // This is a cert verifier that only does one jump in the CA verification, thus only requiring
 // the public key of the issuer. Also, the CA used is derived from the issuer common named, based
 // on our keygen convention.
 #[derive(Debug)]
-struct LiteCertVerifier {
+pub struct LiteCertVerifier {
     /// Suffix for CN verification
     suffix: String,
-    /// CAs, 
+    /// CAs,
     cas: HashSet<ed25519_dalek::VerifyingKey>,
 }
 
@@ -133,20 +194,181 @@ impl LiteCertVerifier {
     }
 }
 
+impl LiteCertVerifier {
+    fn verify_cert(
+        &self,
+        end_entity: &quinn::rustls::pki_types::CertificateDer<'_>,
+    ) -> Result<(), quinn::rustls::Error> {
+        // Check presented signature on end-entity cert is in fact signed by one of our CAs
+        // FIXME: zero-copy parsing
+        let parsed =
+            x509_cert::certificate::Certificate::from_der(end_entity.as_ref()).map_err(|_| {
+                quinn::rustls::Error::InvalidCertificate(
+                    quinn::rustls::CertificateError::BadEncoding,
+                )
+            })?;
+        let issuer = parsed
+            .tbs_certificate
+            .issuer_unique_id
+            .as_ref()
+            .ok_or_else(|| {
+                quinn::rustls::Error::InvalidCertificate(
+                    quinn::rustls::CertificateError::UnknownIssuer,
+                )
+            })?;
+        let issuer = issuer
+            .as_bytes()
+            .and_then(|bytes| ed25519_dalek::VerifyingKey::try_from(bytes).ok())
+            .ok_or_else(|| {
+                quinn::rustls::Error::InvalidCertificate(
+                    quinn::rustls::CertificateError::UnknownIssuer,
+                )
+            })?;
+        if !self.cas.contains(&issuer) {
+            return Err(quinn::rustls::Error::InvalidCertificate(
+                quinn::rustls::CertificateError::UnknownIssuer,
+            ));
+        }
+
+        let tbs_der = parsed.tbs_certificate.to_der().map_err(|_| {
+            quinn::rustls::Error::InvalidCertificate(quinn::rustls::CertificateError::BadEncoding)
+        })?;
+        // FIXME: check signature algo first, then verify. Report error accordingly
+        let sig_bytes = parsed.signature;
+        sig_bytes
+            .as_bytes()
+            .and_then(|bytes| ed25519_dalek::Signature::try_from(bytes).ok())
+            .and_then(|sig| issuer.verify_strict(&tbs_der, &sig).ok())
+            .ok_or_else(|| {
+                quinn::rustls::Error::InvalidCertificate(
+                    quinn::rustls::CertificateError::BadSignature,
+                )
+            })?;
+
+        // Parse pub key, check algorithms
+        let pubkey = parsed
+            .tbs_certificate
+            .subject_public_key_info
+            .subject_public_key
+            .as_bytes()
+            .and_then(|bytes| ed25519_dalek::VerifyingKey::try_from(bytes).ok())
+            .ok_or_else(|| {
+                quinn::rustls::Error::InvalidCertificate(
+                    quinn::rustls::CertificateError::UnsupportedSignatureAlgorithm,
+                )
+            })?;
+        if parsed.signature_algorithm
+            != issuer.signature_algorithm_identifier().map_err(|_| {
+                quinn::rustls::Error::InvalidCertificate(
+                    quinn::rustls::CertificateError::BadEncoding,
+                )
+            })?
+            || parsed.tbs_certificate.subject_public_key_info.algorithm
+                != pubkey.signature_algorithm_identifier().map_err(|_| {
+                    quinn::rustls::Error::InvalidCertificate(
+                        quinn::rustls::CertificateError::BadEncoding,
+                    )
+                })?
+        {
+            return Err(quinn::rustls::Error::InvalidCertificate(
+                quinn::rustls::CertificateError::UnsupportedSignatureAlgorithm,
+            ));
+        }
+
+        // Check presented CN, and also unique subject ID
+        if parsed.tbs_certificate.subject_unique_id
+            != Some(
+                BitString::from_bytes(pubkey.to_bytes().as_slice()).map_err(|_| {
+                    quinn::rustls::Error::General(
+                        "Failed to encode a subject public key".to_string(),
+                    )
+                })?,
+            )
+        {
+            return Err(quinn::rustls::Error::General(
+                "Subject unique ID mismatch".to_string(),
+            ));
+        }
+        let expected_cn = format!("{}.{}", hex::encode(pubkey.to_bytes()), self.suffix);
+        let mut cn_iter = parsed
+            .tbs_certificate
+            .subject
+            .as_ref()
+            .iter()
+            .flat_map(|rdn| {
+                rdn.as_ref()
+                    .iter()
+                    .find(|e| e.oid == const_oid::db::rfc4519::COMMON_NAME)
+            });
+        // Assert: only one cn entry, and matches expected
+        let cn = cn_iter.next();
+        let cn_matched =
+            cn.is_some()
+                && cn.unwrap().value.decode_as::<String>().map_err(|_| {
+                    quinn::rustls::Error::General("Failed to decode CN".to_string())
+                })? == expected_cn;
+        if !cn_matched || cn_iter.next().is_some() {
+            return Err(quinn::rustls::Error::General("CN mismatch".to_string()));
+        }
+
+        Ok(())
+    }
+
+    fn verify_signature(
+        &self,
+        message: &[u8],
+        cert: &quinn::rustls::pki_types::CertificateDer<'_>,
+        dss: &quinn::rustls::DigitallySignedStruct,
+    ) -> Result<(), quinn::rustls::Error> {
+        // FIXME: zero-copy parsing
+        let parsed =
+            x509_cert::certificate::Certificate::from_der(cert.as_ref()).map_err(|_| {
+                quinn::rustls::Error::InvalidCertificate(
+                    quinn::rustls::CertificateError::BadEncoding,
+                )
+            })?;
+        let pubkey = parsed
+            .tbs_certificate
+            .subject_public_key_info
+            .subject_public_key
+            .as_bytes()
+            .and_then(|bytes| ed25519_dalek::VerifyingKey::try_from(bytes).ok())
+            .ok_or_else(|| {
+                quinn::rustls::Error::InvalidCertificate(
+                    quinn::rustls::CertificateError::BadEncoding,
+                )
+            })?;
+        let sig_bytes = dss.signature().as_ref();
+        ed25519_dalek::Signature::try_from(sig_bytes)
+            .and_then(|s| pubkey.verify_strict(message, &s))
+            .map_err(|_| {
+                quinn::rustls::Error::InvalidCertificate(
+                    quinn::rustls::CertificateError::BadSignature,
+                )
+            })?;
+        Ok(())
+    }
+}
+
 impl ServerCertVerifier for LiteCertVerifier {
     fn verify_server_cert(
         &self,
         end_entity: &quinn::rustls::pki_types::CertificateDer<'_>,
         intermediates: &[quinn::rustls::pki_types::CertificateDer<'_>],
-        server_name: &quinn::rustls::pki_types::ServerName<'_>,
-        ocsp_response: &[u8],
-        now: quinn::rustls::pki_types::UnixTime,
+        _server_name: &quinn::rustls::pki_types::ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: quinn::rustls::pki_types::UnixTime,
     ) -> Result<ServerCertVerified, quinn::rustls::Error> {
         if intermediates.len() > 0 {
             // Root CAs should not be served
-            return Err(quinn::rustls::Error::General("Too many intermediates".to_string()));
+            return Err(quinn::rustls::Error::General(
+                "Too many intermediates".to_string(),
+            ));
         }
-        todo!()
+
+        self.verify_cert(end_entity)?;
+
+        Ok(ServerCertVerified::assertion())
     }
 
     fn verify_tls12_signature(
@@ -155,7 +377,9 @@ impl ServerCertVerifier for LiteCertVerifier {
         _: &quinn::rustls::pki_types::CertificateDer<'_>,
         _: &quinn::rustls::DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, quinn::rustls::Error> {
-        Err(quinn::rustls::Error::General("TLS1.2 should not be called".to_string()))
+        Err(quinn::rustls::Error::General(
+            "TLS1.2 should not be called".to_string(),
+        ))
     }
 
     fn verify_tls13_signature(
@@ -164,10 +388,61 @@ impl ServerCertVerifier for LiteCertVerifier {
         cert: &quinn::rustls::pki_types::CertificateDer<'_>,
         dss: &quinn::rustls::DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, quinn::rustls::Error> {
-        todo!()
+        self.verify_signature(message, cert, dss)?;
+        Ok(HandshakeSignatureValid::assertion())
     }
 
     fn supported_verify_schemes(&self) -> Vec<quinn::rustls::SignatureScheme> {
-        todo!()
+        return vec![quinn::rustls::SignatureScheme::ED25519];
+    }
+}
+
+impl ClientCertVerifier for LiteCertVerifier {
+    fn verify_client_cert(
+        &self,
+        end_entity: &quinn::rustls::pki_types::CertificateDer<'_>,
+        intermediates: &[quinn::rustls::pki_types::CertificateDer<'_>],
+        _now: quinn::rustls::pki_types::UnixTime,
+    ) -> Result<ClientCertVerified, quinn::rustls::Error> {
+        if intermediates.len() > 0 {
+            // Root CAs should not be served
+            return Err(quinn::rustls::Error::General(
+                "Too many intermediates".to_string(),
+            ));
+        }
+
+        self.verify_cert(end_entity)?;
+
+        Ok(ClientCertVerified::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<quinn::rustls::SignatureScheme> {
+        return vec![quinn::rustls::SignatureScheme::ED25519];
+    }
+
+    fn root_hint_subjects(&self) -> &[quinn::rustls::DistinguishedName] {
+        // TODO: test this
+        return &[];
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &quinn::rustls::DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, quinn::rustls::Error> {
+        Err(quinn::rustls::Error::General(
+            "TLS1.2 should not be called".to_string(),
+        ))
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &quinn::rustls::DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, quinn::rustls::Error> {
+        self.verify_signature(message, cert, dss)?;
+        Ok(HandshakeSignatureValid::assertion())
     }
 }

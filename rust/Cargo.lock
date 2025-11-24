@@ -478,6 +478,7 @@ dependencies = [
  "anyhow",
  "base64",
  "clap",
+ "const-oid",
  "ed25519-dalek",
  "hex",
  "quinn",

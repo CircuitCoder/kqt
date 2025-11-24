@@ -1,7 +1,7 @@
 #![feature(never_type, try_blocks)]
 
-mod store;
 mod cert;
+mod store;
 
 use clap::Parser;
 use quinn::{
@@ -14,9 +14,14 @@ use quinn::{
         version::TLS13,
     },
 };
-use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{collections::HashSet, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
-use crate::store::Store;
+use crate::{
+    cert::{LiteCertVerifier, ParsedSignedKeypair},
+    store::Store,
+};
+
+const KQT_PROTO_VERSION: &'static [u8] = b"kqt/0.1";
 
 fn parse_connect(s: &str) -> anyhow::Result<(String, SocketAddr)> {
     let mut parts = s.splitn(2, ',');
@@ -38,21 +43,19 @@ struct Args {
     #[arg(short, long)]
     listen: Option<SocketAddr>,
 
+    /// Signed keypair
+    keypair: String,
+
+    /// Suffix used in certificate verification, should be regarded as a PSK
+    suffix: String,
+
     /// Connect to a remote node
     #[arg(value_parser = parse_connect, help = "Connect to a remote node. Format: <SAN>,<address>")]
     connect: Vec<(String, SocketAddr)>,
 
-    #[arg(short, long, default_value = "/etc/kqt/key.pem")]
-    /// Private key for this node
-    key: PathBuf,
-
-    #[arg(short, long, default_value = "/etc/kqt/cert.pem")]
-    /// Cerfificate for this node
-    cert: PathBuf,
-
-    #[arg(long, default_value = "/etc/kqt/ca.pem")]
+    #[arg(short, long)]
     /// CA for authenticating incoming connections
-    ca: PathBuf,
+    ca: Vec<String>,
 
     #[arg(short, long, default_value = "kqt0")]
     /// Name of the iface
@@ -89,21 +92,15 @@ async fn main() -> anyhow::Result<!> {
         std::process::exit(1);
     }
 
-    // Parse certificate
-    let pk = PrivateKeyDer::from_pem_file(&args.key)?;
-    let chain = CertificateDer::pem_file_iter(&args.cert)?.collect::<Result<Vec<_>, _>>()?;
-    let ca = CertificateDer::pem_file_iter(&args.ca)?.collect::<Result<Vec<_>, _>>()?;
-
-    // Create CA stores
-    let mut root_store = rustls::RootCertStore::empty();
-    let (ca_added, ca_ignored) = root_store.add_parsable_certificates(ca);
-    if ca_added == 0 {
-        tracing::error!("No valid certificates found in {}", args.ca.display());
-        std::process::exit(1);
-    } else {
-        tracing::info!("{} CA cert added, {} ignored", ca_added, ca_ignored);
-    }
-    let root_store = Arc::new(root_store);
+    // Create Trust Ancrhos & verifier
+    let trusts = args
+        .ca
+        .iter()
+        .map(|t| cert::ParsedTrustAnchor::try_from(t.as_str()).map(|e| e.0))
+        .collect::<Result<HashSet<_>, _>>()?;
+    let verifier = cert::LiteCertVerifier::new(args.suffix.clone(), trusts);
+    let verifier = Arc::new(verifier);
+    let kp = ParsedSignedKeypair::try_from(args.keypair.as_str())?;
 
     let mut transport = quinn::TransportConfig::default();
     // TODO: discovery config
@@ -124,20 +121,24 @@ async fn main() -> anyhow::Result<!> {
     let mut endpoint = if let Some(listen) = args.listen {
         create_server_endpoint(
             listen,
-            root_store.clone(),
-            chain.clone(),
-            pk.clone_key(),
+            verifier.clone(),
+            kp.clone(),
+            &args.suffix,
             transport.clone(),
         )?
     } else {
         quinn::Endpoint::client((std::net::Ipv6Addr::UNSPECIFIED, 0).into())?
     };
 
+    let (cert, sk) = kp.try_to_rustls(&args.suffix)?;
+
     let mut client_crypto = rustls::ClientConfig::builder_with_protocol_versions(&[&TLS13])
-        .with_root_certificates(root_store.clone())
-        .with_client_auth_cert(chain.clone(), pk.clone_key())?;
-    client_crypto.alpn_protocols = vec![b"kqt/0.1".to_vec()];
-    let client_crypto = Arc::new(client_crypto);
+        .dangerous()
+        .with_custom_certificate_verifier(verifier)
+        .with_client_auth_cert(vec![cert], sk)?;
+    client_crypto.enable_sni = false; // Disable SNI
+    client_crypto.alpn_protocols = vec![KQT_PROTO_VERSION.to_vec()];
+    let client_crypto: Arc<rustls::ClientConfig> = Arc::new(client_crypto);
     let mut client_cfg: quinn::ClientConfig =
         quinn::ClientConfig::new(Arc::new(QuicClientConfig::try_from(client_crypto)?));
     client_cfg.transport_config(transport);
@@ -192,17 +193,16 @@ async fn main() -> anyhow::Result<!> {
 
 fn create_server_endpoint(
     listen: SocketAddr,
-    root_cert_store: Arc<RootCertStore>,
-    chain: Vec<CertificateDer<'static>>,
-    key: PrivateKeyDer<'static>,
+    verifier: Arc<LiteCertVerifier>,
+    kp: ParsedSignedKeypair,
+    suffix: &str,
     transport: Arc<quinn::TransportConfig>,
 ) -> anyhow::Result<Endpoint> {
-    let client_cert_verifier =
-        rustls::server::WebPkiClientVerifier::builder(root_cert_store).build()?;
+    let (cert, key) = kp.try_to_rustls(suffix)?;
     let mut server_crypto = rustls::ServerConfig::builder_with_protocol_versions(&[&TLS13])
-        .with_client_cert_verifier(client_cert_verifier)
-        .with_single_cert(chain, key)?;
-    server_crypto.alpn_protocols = vec![b"kqt/0.1".to_vec()];
+        .with_client_cert_verifier(verifier)
+        .with_single_cert(vec![cert], key)?;
+    server_crypto.alpn_protocols = vec![KQT_PROTO_VERSION.to_vec()];
     let mut server_cfg =
         quinn::ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(server_crypto)?));
     server_cfg.transport_config(transport);

@@ -30,7 +30,7 @@ enum Cmds {
         /// Output format
         #[arg(short, long, value_enum, default_value_t = OutputFormat::String)]
         format: OutputFormat,
-    } 
+    },
 }
 
 #[derive(Parser)]
@@ -59,32 +59,42 @@ fn main() -> anyhow::Result<()> {
             base64::engine::general_purpose::STANDARD.encode_string(pk.to_bytes(), &mut encoded);
             println!("t.{}", encoded);
         }
-        Cmds::Node { issuer, format, suffix } => {
+        Cmds::Node {
+            issuer,
+            format,
+            suffix,
+        } => {
             let ParsedPrivateKey(issuer_sk) = ParsedPrivateKey::try_from(issuer.as_str())?;
             let issuer_pk = ed25519_dalek::VerifyingKey::from(&issuer_sk);
 
             // Generate key
             let sk = ed25519_dalek::SigningKey::generate(&mut rand_core::OsRng);
+            let pk = sk.verifying_key();
 
             // Generate TBS cert
-            let tbs = cert::recover_tbs_cert(sk.clone(), issuer_pk, &suffix)?;
+            let tbs = cert::recover_tbs_cert(pk, issuer_pk, &suffix)?;
             let sig = cert::sign_cert(&tbs, &issuer_sk)?;
 
             match format {
                 OutputFormat::Pem => {
-                    let cert = cert::recover_cert(sk, issuer_pk, sig, &suffix)?;
+                    let cert = cert::recover_cert(pk, issuer_pk, sig, &suffix)?;
                     // TODO: check signature again
                     println!("{}", cert.to_pem(LineEnding::LF)?);
                 }
                 OutputFormat::String => {
-                    let sk_buflen = ed25519_dalek::SECRET_KEY_LENGTH / 2 * 3 + 1;
+                    let key_buflen = ed25519_dalek::SECRET_KEY_LENGTH / 2 * 3 + 1;
                     let sig_bytes = sig.to_bytes();
                     let sig_buflen = sig_bytes.len() / 2 * 3 + 1;
-                    let mut sk_encoded = String::with_capacity(sk_buflen);
+                    let mut sk_encoded = String::with_capacity(key_buflen);
+                    let mut issuer_encoded = String::with_capacity(key_buflen);
                     let mut sig_encoded = String::with_capacity(sig_buflen);
-                    base64::engine::general_purpose::STANDARD.encode_string(sk.to_bytes(), &mut sk_encoded);
-                    base64::engine::general_purpose::STANDARD.encode_string(sig_bytes, &mut sig_encoded);
-                    println!("c.{}.{}", sk_encoded, sig_encoded);
+                    base64::engine::general_purpose::STANDARD
+                        .encode_string(sk.to_bytes(), &mut sk_encoded);
+                    base64::engine::general_purpose::STANDARD
+                        .encode_string(issuer_pk.to_bytes(), &mut issuer_encoded);
+                    base64::engine::general_purpose::STANDARD
+                        .encode_string(sig_bytes, &mut sig_encoded);
+                    println!("c.{}.{}.{}", sk_encoded, issuer_encoded, sig_encoded);
                 }
             }
         }
