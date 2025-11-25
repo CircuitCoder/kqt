@@ -54,8 +54,8 @@ pub fn recover_tbs_cert(
         subject,
         subject_public_key_info: SubjectPublicKeyInfo::from_key(raw_pk)?,
 
-        issuer_unique_id: Some(BitString::from_bytes(raw_issuer.to_bytes().as_slice())?),
-        subject_unique_id: Some(BitString::from_bytes(pk_bytes.as_slice())?),
+        issuer_unique_id: None,
+        subject_unique_id: None,
         extensions: Some(vec![bc_ext]),
     };
 
@@ -354,7 +354,7 @@ impl LiteCertVerifier {
                     quinn::rustls::CertificateError::BadEncoding,
                 )
             })?;
-        let sig_bytes = dss.signature().as_ref();
+        let sig_bytes = dss.signature();
         ed25519_dalek::Signature::try_from(sig_bytes)
             .and_then(|s| pubkey.verify_strict(message, &s))
             .map_err(|_| {
