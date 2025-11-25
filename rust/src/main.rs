@@ -6,7 +6,7 @@ mod store;
 
 use clap::Parser;
 use quinn::{
-    Connecting, Endpoint,
+    Connecting, Endpoint, MtuDiscoveryConfig,
     congestion::BbrConfig,
     crypto::rustls::{QuicClientConfig, QuicServerConfig},
     rustls::{self, version::TLS13},
@@ -27,7 +27,7 @@ struct Args {
     /// Name of the iface
     name: String,
 
-    #[arg(long, default_value = "1200")]
+    #[arg(long, default_value = "1452")]
     /// Initial outer connection MTU
     initial_outer_mtu: u16,
 
@@ -71,7 +71,12 @@ async fn main() -> anyhow::Result<!> {
     let kp = cert::ParsedKeypair::try_from(cfg.keypair.as_str())?;
 
     let mut transport = quinn::TransportConfig::default();
-    // TODO: discovery config
+    let mut mtu_discovery = MtuDiscoveryConfig::default();
+    mtu_discovery
+        .interval(Duration::from_secs(30))
+        .black_hole_cooldown(Duration::from_secs(10))
+        .minimum_change(10);
+    transport.mtu_discovery_config(Some(mtu_discovery));
     transport.initial_mtu(args.initial_outer_mtu);
     transport.max_idle_timeout(Some(
         Duration::from_secs(args.max_idle_timeout as u64).try_into()?,
