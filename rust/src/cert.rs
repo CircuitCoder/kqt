@@ -1,4 +1,4 @@
-use std::{collections::HashSet, str::FromStr};
+use std::{collections::HashMap, str::FromStr};
 
 use base64::Engine;
 use ed25519_dalek::Signer;
@@ -200,17 +200,58 @@ impl<'a> TryFrom<&'a str> for ParsedKeypair {
 pub struct LiteCertVerifier {
     /// Suffix for CN verification
     suffix: String,
-    /// CAs,
-    cas: HashSet<ed25519_dalek::VerifyingKey>,
+    // Trust anchors
+    serialized_anchors: HashMap<String, ed25519_dalek::VerifyingKey>,
 }
 
 impl LiteCertVerifier {
-    pub fn new(suffix: String, cas: HashSet<ed25519_dalek::VerifyingKey>) -> Self {
-        Self { suffix, cas }
+    pub fn new<'a>(
+        suffix: String,
+        anchors: impl Iterator<Item = ed25519_dalek::VerifyingKey>,
+    ) -> Self {
+        let serialized_anchors = anchors.map(|e| (hex::encode(e.to_bytes()), e)).collect();
+        Self {
+            suffix,
+            serialized_anchors,
+        }
+    }
+
+    pub fn try_new<'a, E>(
+        suffix: String,
+        anchors: impl Iterator<Item = Result<ed25519_dalek::VerifyingKey, E>>,
+    ) -> Result<Self, E> {
+        let serialized_anchors = anchors
+            .map(|e| -> Result<_, E> {
+                let e = e?;
+                Ok((hex::encode(e.to_bytes()), e))
+            })
+            .collect::<Result<HashMap<_, _>, _>>()?;
+        Ok(Self {
+            suffix,
+            serialized_anchors,
+        })
     }
 }
 
 impl LiteCertVerifier {
+    fn check_anchor(&self, issuer: &str) -> Option<&ed25519_dalek::VerifyingKey> {
+        if !issuer.is_ascii() {
+            // So that we can arbitrarily slice
+            return None;
+        }
+
+        if !issuer.ends_with(&self.suffix) {
+            return None;
+        }
+
+        if &issuer[issuer.len() - self.suffix.len() - 1..issuer.len() - self.suffix.len()] != "." {
+            return None;
+        }
+
+        self.serialized_anchors
+            .get(&issuer[0..issuer.len() - self.suffix.len() - 1])
+    }
+
     fn verify_cert(
         &self,
         end_entity: &quinn::rustls::pki_types::CertificateDer<'_>,
@@ -223,28 +264,28 @@ impl LiteCertVerifier {
                     quinn::rustls::CertificateError::BadEncoding,
                 )
             })?;
+
         let issuer = parsed
             .tbs_certificate
-            .issuer_unique_id
+            .issuer
             .as_ref()
-            .ok_or_else(|| {
-                quinn::rustls::Error::InvalidCertificate(
-                    quinn::rustls::CertificateError::UnknownIssuer,
-                )
-            })?;
-        let issuer = issuer
-            .as_bytes()
-            .and_then(|bytes| ed25519_dalek::VerifyingKey::try_from(bytes).ok())
-            .ok_or_else(|| {
-                quinn::rustls::Error::InvalidCertificate(
-                    quinn::rustls::CertificateError::UnknownIssuer,
-                )
-            })?;
-        if !self.cas.contains(&issuer) {
+            .iter()
+            .flat_map(|rdn| {
+                rdn.as_ref()
+                    .iter()
+                    .find(|e| e.oid == const_oid::db::rfc4519::COMMON_NAME)
+            })
+            .next()
+            .ok_or_else(|| quinn::rustls::Error::General("Issuer CN not found".to_string()))?
+            .value
+            .decode_as::<String>()
+            .map_err(|_| quinn::rustls::Error::General("Failed to decode issuer CN".to_string()))?;
+
+        let Some(issuer) = self.check_anchor(&issuer) else {
             return Err(quinn::rustls::Error::InvalidCertificate(
                 quinn::rustls::CertificateError::UnknownIssuer,
             ));
-        }
+        };
 
         let tbs_der = parsed.tbs_certificate.to_der().map_err(|_| {
             quinn::rustls::Error::InvalidCertificate(quinn::rustls::CertificateError::BadEncoding)
@@ -291,39 +332,11 @@ impl LiteCertVerifier {
             ));
         }
 
-        // Check presented CN, and also unique subject ID
-        if parsed.tbs_certificate.subject_unique_id
-            != Some(
-                BitString::from_bytes(pubkey.to_bytes().as_slice()).map_err(|_| {
-                    quinn::rustls::Error::General(
-                        "Failed to encode a subject public key".to_string(),
-                    )
-                })?,
-            )
-        {
-            return Err(quinn::rustls::Error::General(
-                "Subject unique ID mismatch".to_string(),
-            ));
-        }
-        let expected_cn = format!("{}.{}", hex::encode(pubkey.to_bytes()), self.suffix);
-        let mut cn_iter = parsed
-            .tbs_certificate
-            .subject
-            .as_ref()
-            .iter()
-            .flat_map(|rdn| {
-                rdn.as_ref()
-                    .iter()
-                    .find(|e| e.oid == const_oid::db::rfc4519::COMMON_NAME)
-            });
-        // Assert: only one cn entry, and matches expected
-        let cn = cn_iter.next();
-        let cn_matched =
-            cn.is_some()
-                && cn.unwrap().value.decode_as::<String>().map_err(|_| {
-                    quinn::rustls::Error::General("Failed to decode CN".to_string())
-                })? == expected_cn;
-        if !cn_matched || cn_iter.next().is_some() {
+        // Check presented CN
+        let expected_name = hex::encode(pubkey.to_bytes());
+        let expected_subject =
+            x509_cert::name::RdnSequence::from_str(&format!("CN={expected_name}.{}", &self.suffix));
+        if expected_subject != Ok(parsed.tbs_certificate.subject) {
             return Err(quinn::rustls::Error::General("CN mismatch".to_string()));
         }
 

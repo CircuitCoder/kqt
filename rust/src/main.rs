@@ -1,6 +1,7 @@
 #![feature(never_type, try_blocks)]
 
 mod cert;
+mod config;
 mod store;
 
 use clap::Parser;
@@ -10,47 +11,19 @@ use quinn::{
     crypto::rustls::{QuicClientConfig, QuicServerConfig},
     rustls::{self, version::TLS13},
 };
-use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Duration};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use crate::{cert::LiteCertVerifier, store::Store};
 
 const KQT_PROTO_VERSION: &'static [u8] = b"kqt/0.1";
 
-fn parse_connect(s: &str) -> anyhow::Result<(String, SocketAddr)> {
-    let mut parts = s.splitn(2, ',');
-    let name = parts
-        .next()
-        .ok_or_else(|| anyhow::anyhow!("Missing server SAN"))?
-        .to_string();
-    let addr = parts
-        .next()
-        .ok_or_else(|| anyhow::anyhow!("Missing address"))?;
-    let addr = addr.parse::<SocketAddr>()?;
-    Ok((name, addr))
-}
-
 #[derive(Parser)]
 #[command(version, about)]
 struct Args {
-    /// Enable server mode
-    #[arg(short, long)]
-    listen: Option<SocketAddr>,
+    /// Path to the config file
+    config: PathBuf,
 
-    /// Signed keypair
-    keypair: String,
-
-    /// Suffix used in certificate verification, should be regarded as a PSK
-    suffix: String,
-
-    /// Connect to a remote node
-    #[arg(value_parser = parse_connect, help = "Connect to a remote node. Format: <SAN>,<address>")]
-    connect: Vec<(String, SocketAddr)>,
-
-    #[arg(short, long)]
-    /// CA for authenticating incoming connections
-    ca: Vec<String>,
-
-    #[arg(short, long, default_value = "kqt0")]
+    #[arg(default_value = "kqt0")]
     /// Name of the iface
     name: String,
 
@@ -80,20 +53,22 @@ async fn main() -> anyhow::Result<!> {
     tracing_subscriber::fmt::init();
 
     let args = Args::parse();
-    if args.connect.is_empty() && args.listen.is_none() {
-        tracing::error!("At least one of --listen or --connect must be specified.");
+    let s = std::fs::read_to_string(&args.config)?;
+    let cfg: config::Config = toml::de::from_str(&s)?;
+
+    if cfg.connect_to.is_empty() && cfg.listen.is_none() {
+        tracing::error!("At least one of listen or connect_to must be specified.");
         std::process::exit(1);
     }
 
     // Create Trust Ancrhos & verifier
-    let trusts = args
-        .ca
+    let trusts = cfg
+        .anchor
         .iter()
-        .map(|t| cert::ParsedTrustAnchor::try_from(t.as_str()).map(|e| e.0))
-        .collect::<Result<HashSet<_>, _>>()?;
-    let verifier = cert::LiteCertVerifier::new(args.suffix.clone(), trusts);
+        .map(|t| cert::ParsedTrustAnchor::try_from(t.as_str()).map(|e| e.0));
+    let verifier = cert::LiteCertVerifier::try_new(cfg.suffix.clone(), trusts)?;
     let verifier = Arc::new(verifier);
-    let kp = cert::ParsedKeypair::try_from(args.keypair.as_str())?;
+    let kp = cert::ParsedKeypair::try_from(cfg.keypair.as_str())?;
 
     let mut transport = quinn::TransportConfig::default();
     // TODO: discovery config
@@ -111,19 +86,19 @@ async fn main() -> anyhow::Result<!> {
     }
     let transport = Arc::new(transport);
 
-    let mut endpoint = if let Some(listen) = args.listen {
+    let mut endpoint = if let Some(listen) = cfg.listen {
         create_server_endpoint(
             listen,
             verifier.clone(),
             kp.clone(),
-            &args.suffix,
+            &cfg.suffix,
             transport.clone(),
         )?
     } else {
         quinn::Endpoint::client((std::net::Ipv6Addr::UNSPECIFIED, 0).into())?
     };
 
-    let (cert, sk) = kp.try_into_rustls(&args.suffix)?;
+    let (cert, sk) = kp.try_into_rustls(&cfg.suffix)?;
 
     let mut client_crypto = rustls::ClientConfig::builder_with_protocol_versions(&[&TLS13])
         .dangerous()
@@ -154,17 +129,16 @@ async fn main() -> anyhow::Result<!> {
 
     // Main loop
     // Handle client
-    for (name, addr) in args.connect {
+    for conn_cfg in cfg.connect_to {
         tokio::spawn(handle_target(
             endpoint.clone(),
             device.clone(),
-            addr,
-            name,
+            conn_cfg.endpoint,
             store.clone(),
         ));
     }
     // Handle server
-    if args.listen.is_some() {
+    if cfg.listen.is_some() {
         tokio::spawn(handle_server(endpoint, device.clone(), store.clone()));
     }
     // Handle tap send
@@ -207,12 +181,12 @@ async fn handle_target(
     ep: Endpoint,
     device: Arc<tokio_tun::Tun>,
     addr: SocketAddr,
-    name: String,
     store: Store,
 ) -> ! {
     loop {
         let Err(err): anyhow::Result<!> = try {
-            let conn = ep.connect(addr, &name)?;
+            // We don't actually use server_name. Use a dummy IPv4 here.
+            let conn = ep.connect(addr, "0.0.0.0")?;
             handle_connection(conn, device.clone(), store.clone()).await?
         };
         tracing::error!("Outgoing connection to {} closed: {}", addr, err);
@@ -239,7 +213,7 @@ async fn handle_connection(
     let ret = try {
         loop {
             let dgram = conn.read_datagram().await?;
-            // tracing::debug!("[RECV] {}", dgram.len());
+            tracing::debug!("[RECV] {}", dgram.len());
             if dgram.len() == 0 {
                 tracing::warn!("Empty datagram received");
                 continue;
@@ -271,6 +245,7 @@ async fn handle_server(
     device: Arc<tokio_tun::Tun>,
     store: Store,
 ) -> anyhow::Result<()> {
+    tracing::info!("Listening on {}", ep.local_addr()?);
     while let Some(incoming) = ep.accept().await {
         let conn = incoming.accept()?;
         let from = conn.remote_address();
