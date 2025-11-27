@@ -1,9 +1,5 @@
 #![feature(never_type, try_blocks)]
 
-mod cert;
-mod config;
-mod store;
-
 use clap::Parser;
 use quinn::{
     Connecting, Endpoint, MtuDiscoveryConfig,
@@ -13,7 +9,8 @@ use quinn::{
 };
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
-use crate::{cert::LiteCertVerifier, store::Store};
+use kqt::*;
+use kqt::{cert::LiteCertVerifier, store::Store};
 
 const KQT_PROTO_VERSION: &'static [u8] = b"kqt/0.1";
 

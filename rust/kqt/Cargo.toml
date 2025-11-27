@@ -3,7 +3,7 @@ name = "kqt-rust"
 description = "Rust userspace implementation for kqt"
 version = "0.1.0"
 edition = "2024"
-default-run = "kqt"
+default-run = "kqt-tap"
 
 [dependencies]
 anyhow = "1.0.98"
@@ -22,10 +22,13 @@ const-oid = { version = "0.9.6", features = ["db"] }
 toml = "0.9.8"
 serde = { version = "1.0.228", features = ["derive"] }
 
-[[bin]]
+[lib]
 name = "kqt"
+
+[[bin]]
+name = "kqt-tap"
 path = "src/main.rs"
 
 [[bin]]
-name = "keygen"
+name = "kqt-keygen"
 path = "src/keygen.rs"

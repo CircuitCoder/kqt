@@ -1,10 +1,9 @@
-mod cert;
-
 use base64::Engine;
 use clap::{Parser, Subcommand, ValueEnum};
 use x509_cert::der::{EncodePem, pem::LineEnding};
 
-use crate::cert::ParsedKeypair;
+use kqt::cert;
+use kqt::cert::ParsedKeypair;
 
 #[derive(ValueEnum, Clone)]
 enum OutputFormat {

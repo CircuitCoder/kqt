@@ -311,7 +311,7 @@ impl LiteCertVerifier {
             .and_then(|bytes| ed25519_dalek::VerifyingKey::try_from(bytes).ok())
             .ok_or_else(|| {
                 quinn::rustls::Error::InvalidCertificate(
-                    quinn::rustls::CertificateError::UnsupportedSignatureAlgorithm,
+                    quinn::rustls::CertificateError::BadEncoding,
                 )
             })?;
         if parsed.signature_algorithm
@@ -328,7 +328,7 @@ impl LiteCertVerifier {
                 })?
         {
             return Err(quinn::rustls::Error::InvalidCertificate(
-                quinn::rustls::CertificateError::UnsupportedSignatureAlgorithm,
+                quinn::rustls::CertificateError::BadEncoding,
             ));
         }
 
