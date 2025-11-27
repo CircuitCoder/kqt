@@ -1,31 +1,4 @@
-[package]
-name = "kqt-rust"
-description = "Rust userspace implementation for kqt"
-version = "0.1.0"
-edition = "2024"
-default-run = "kqt"
-
-[dependencies]
-anyhow = "1.0.98"
-base64 = "0.22.1"
-clap = { version = "4.5.40", features = ["derive"] }
-ed25519-dalek = { version = "2.2.0", features = ["pkcs8", "rand_core"] }
-hex = "0.4.3"
-quinn = "0.11.8"
-rand_core = { version = "0.6.4", features = ["getrandom"] }
-tokio = { version = "1.46", features = ["net", "rt-multi-thread", "rt", "macros"] }
-tokio-tun = "0.13.2"
-tracing = "0.1.41"
-tracing-subscriber = "0.3.19"
-x509-cert = "0.2.5"
-const-oid = { version = "0.9.6", features = ["db"] }
-toml = "0.9.8"
-serde = { version = "1.0.228", features = ["derive"] }
-
-[[bin]]
-name = "kqt"
-path = "src/main.rs"
-
-[[bin]]
-name = "keygen"
-path = "src/keygen.rs"
+[workspace]
+members = [
+  "kqt",
+]
