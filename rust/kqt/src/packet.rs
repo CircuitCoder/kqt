@@ -1,8 +1,5 @@
 use rand_core::RngCore;
 
-const IPV4_SOURCE: std::net::Ipv4Addr = std::net::Ipv4Addr::new(192, 0, 2, 1);
-const IPV6_SOURCE: std::net::Ipv6Addr = std::net::Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
-
 fn populate_ipv4_packet_too_big(mtu: usize, orig: &[u8], buf: &mut [u8]) -> anyhow::Result<Option<usize>> {
     use pnet::packet::icmp::IcmpTypes;
     use pnet::packet::icmp::destination_unreachable::{IcmpCodes, MutableDestinationUnreachablePacket};
@@ -19,10 +16,9 @@ fn populate_ipv4_packet_too_big(mtu: usize, orig: &[u8], buf: &mut [u8]) -> anyh
 
     // Prepare ICMPv4 Destination Unreachable (Fragmentation Needed and DF set)
     let mut ipv4 = MutableIpv4Packet::new(buf).ok_or_else(|| anyhow::anyhow!("Buffer too short"))?;
-    // Select a arbitrary source address for the IP packet surrounding ICMP, because no body cares.
     ipv4.set_version(4);
-    ipv4.set_source(IPV4_SOURCE);
-    ipv4.set_destination(ipv4.get_source());
+    ipv4.set_source(ipv4_orig.get_destination());
+    ipv4.set_destination(ipv4_orig.get_source());
     // Set other fields
     ipv4.set_header_length(5);
     ipv4.set_dscp(0);
@@ -73,8 +69,7 @@ fn populate_ipv6_packet_too_big(mtu: usize, orig: &[u8], buf: &mut [u8]) -> anyh
 
     // Prepare ICMPv6 Packet Too Big
     let mut ipv6 = MutableIpv6Packet::new(buf).ok_or_else(|| anyhow::anyhow!("Buffer too short"))?;
-    // Select a arbitrary source address for the IP packet surrounding ICMPv6, because no body cares.
-    ipv6.set_source(IPV6_SOURCE);
+    ipv6.set_source(ipv6_orig.get_destination());
     ipv6.set_destination(ipv6_orig.get_source());
     // Set other fields
     ipv6.set_version(6);
