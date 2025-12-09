@@ -21,6 +21,8 @@ x509-cert = "0.2.5"
 const-oid = { version = "0.9.6", features = ["db"] }
 toml = "0.9.8"
 serde = { version = "1.0.228", features = ["derive"] }
+pnet = "0.35.0"
+thiserror = "2.0.17"
 
 [lib]
 name = "kqt"

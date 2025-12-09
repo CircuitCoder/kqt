@@ -9,10 +9,11 @@ use quinn::{
 };
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
-use kqt::*;
-use kqt::{cert::LiteCertVerifier, store::Store};
+use kqt::{packet::populate_packet_too_big, *};
+use kqt::{cert::LiteCertVerifier, peers::Peers};
 
 const KQT_PROTO_VERSION: &'static [u8] = b"kqt/0.1";
+const ETH_HDR_LEN: usize = 14;
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -125,7 +126,7 @@ async fn main() -> anyhow::Result<!> {
             .pop()
             .unwrap(),
     );
-    let store = Store::new();
+    let store = Peers::new();
 
     tracing::debug!("Device created");
 
@@ -156,7 +157,33 @@ async fn main() -> anyhow::Result<!> {
         }
         buf.resize(mtu as usize + 18, 0);
         let len = device.recv(&mut buf).await?;
-        store.send(&buf[..len]).await;
+        loop {
+            if let Err(e) = store.send(&buf[..len]).await {
+                match e {
+                    peers::SendError::PacketTooBig { mtu } => {
+                        if mtu >= len {
+                            // Retry
+                            // TODO: bound retry iterations?
+                            continue;
+                        } else {
+                            tracing::debug!("Handling Packet Too Big");
+                            let ip_pkt = &buf[ETH_HDR_LEN..]; // Skip Ethernet header
+                            let mut resp_buf = vec![0u8; 1500 + ETH_HDR_LEN];
+                            if let Some(len) = populate_packet_too_big(mtu - ETH_HDR_LEN, ip_pkt, &mut resp_buf[ETH_HDR_LEN..])? {
+                                resp_buf[0..6].copy_from_slice(&buf[6..12]);
+                                resp_buf[6..12].fill(0);
+                                resp_buf[13..14].copy_from_slice(&buf[13..14]);
+                                device.send(&resp_buf[..len + ETH_HDR_LEN]).await?;
+                            }
+                        }
+                    }
+                    e => {
+                        tracing::error!("Error sending datagram: {:?}", e);
+                    }
+                }
+            }
+            break;
+        }
     }
 }
 
@@ -183,7 +210,7 @@ async fn handle_target(
     ep: Endpoint,
     device: Arc<tokio_tun::Tun>,
     addr: SocketAddr,
-    store: Store,
+    store: Peers,
 ) -> ! {
     loop {
         let Err(err): anyhow::Result<!> = try {
@@ -204,7 +231,7 @@ async fn handle_target(
 async fn handle_connection(
     conn: Connecting,
     device: Arc<tokio_tun::Tun>,
-    store: Store,
+    store: Peers,
 ) -> anyhow::Result<!> {
     let conn = conn.await?;
     let mds = conn.max_datagram_size();
@@ -232,7 +259,7 @@ async fn handle_connection(
 
             // Also, parse the source MAC address
             if let Some(mac) = dgram.get(7..12).and_then(|s| s.try_into().ok()) {
-                let mac_addr = store::MACAddr(mac);
+                let mac_addr = peers::MACAddr(mac);
                 // Register the connection with the MAC address
                 store.link(id, conn.clone(), mac_addr).await;
             }
@@ -245,7 +272,7 @@ async fn handle_connection(
 async fn handle_server(
     ep: Endpoint,
     device: Arc<tokio_tun::Tun>,
-    store: Store,
+    store: Peers,
 ) -> anyhow::Result<()> {
     tracing::info!("Listening on {}", ep.local_addr()?);
     while let Some(incoming) = ep.accept().await {

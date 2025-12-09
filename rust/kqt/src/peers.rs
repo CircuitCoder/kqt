@@ -1,28 +1,39 @@
 use std::{collections::HashMap, sync::Arc};
+use thiserror::Error;
 use tokio::sync::RwLock;
 
-use quinn::Connection;
+use quinn::{Connection, SendDatagramError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MACAddr(pub [u8; 6]);
 
-struct StoreInner {
+struct PeersInner {
     linked: HashMap<MACAddr, (usize, Connection)>,
     id: HashMap<usize, Connection>,
     counter: usize,
 }
 
 #[derive(Clone)]
-pub struct Store(Arc<RwLock<StoreInner>>);
+pub struct Peers(Arc<RwLock<PeersInner>>);
 
-impl Store {
+#[derive(Error, Debug)]
+pub enum SendError {
+    #[error("packet too big, mtu: {mtu}")]
+    PacketTooBig{ mtu: usize },
+    #[error("datagram disabled")]
+    DgramDisabled,
+    #[error("unknown error")]
+    Unknown(#[from] SendDatagramError)
+}
+
+impl Peers {
     pub fn new() -> Self {
-        let inner = StoreInner {
+        let inner = PeersInner {
             linked: HashMap::new(),
             id: HashMap::new(),
             counter: 0,
         };
-        Store(Arc::new(RwLock::new(inner)))
+        Peers(Arc::new(RwLock::new(inner)))
     }
 
     pub async fn register(&self, conn: Connection) -> usize {
@@ -44,7 +55,7 @@ impl Store {
         inner.linked.retain(|_, v| v.0 != conn);
     }
 
-    pub async fn send(&self, data: &[u8]) {
+    pub async fn send(&self, data: &[u8]) -> Result<(), SendError> {
         // Ignore failed connections
         let inner = self.0.read().await;
         let specific = data
@@ -52,28 +63,32 @@ impl Store {
             .and_then(|s| inner.linked.get(&MACAddr(s.try_into().unwrap())));
         tracing::debug!("[SEND] {}", data.len());
         if let Some((_, conn)) = specific {
-            Self::send_to(data, conn);
+            Self::send_to(data, conn)
         } else {
             for (_, conn) in inner.id.iter() {
-                Self::send_to(data, conn);
+                let _ = Self::send_to(data, conn);
             }
+            Ok(())
         }
     }
 
-    fn send_to(data: &[u8], conn: &Connection) {
+    fn send_to(data: &[u8], conn: &Connection) -> Result<(), SendError> {
         let cur_max_dgram_size = conn.max_datagram_size();
         if cur_max_dgram_size.is_none() {
-            tracing::warn!("[SEND {}] Datagram disabled", conn.remote_address());
-        } else if cur_max_dgram_size.unwrap() < data.len() {
-            tracing::warn!(
-                "[SEND {}] Datagram size {} > current max size {}",
-                conn.remote_address(),
-                data.len(),
-                cur_max_dgram_size.unwrap()
-            );
+            return Err(SendError::DgramDisabled);
         }
+
+        let cur_max_dgram_size = cur_max_dgram_size.unwrap();
+        
         if let Err(e) = conn.send_datagram(data.to_owned().into()) {
             tracing::warn!("[SEND {}] Failed: {}", conn.remote_address(), e);
+
+            match e {
+                quinn::SendDatagramError::TooLarge => Err(SendError::PacketTooBig{ mtu: cur_max_dgram_size }),
+                e => Err(SendError::Unknown(e)),
+            }
+        } else {
+            Ok(())
         }
     }
 }
