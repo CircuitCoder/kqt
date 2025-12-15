@@ -19,11 +19,11 @@ pub struct Peers(Arc<RwLock<PeersInner>>);
 #[derive(Error, Debug)]
 pub enum SendError {
     #[error("packet too big, mtu: {mtu}")]
-    PacketTooBig{ mtu: usize },
+    PacketTooBig { mtu: usize },
     #[error("datagram disabled")]
     DgramDisabled,
     #[error("unknown error")]
-    Unknown(#[from] SendDatagramError)
+    Unknown(#[from] SendDatagramError),
 }
 
 impl Peers {
@@ -79,13 +79,15 @@ impl Peers {
         }
 
         let cur_max_dgram_size = cur_max_dgram_size.unwrap();
-        
+
         if let Err(e) = conn.send_datagram(data.to_owned().into()) {
             tracing::warn!("[SEND {}] Failed: {}", conn.remote_address(), e);
 
             match e {
-                quinn::SendDatagramError::TooLarge => Err(SendError::PacketTooBig{ mtu: cur_max_dgram_size }),
-                e => Err(e.into())
+                quinn::SendDatagramError::TooLarge => Err(SendError::PacketTooBig {
+                    mtu: cur_max_dgram_size,
+                }),
+                e => Err(e.into()),
             }
         } else {
             Ok(())

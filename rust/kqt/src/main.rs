@@ -2,13 +2,20 @@
 
 use clap::Parser;
 use quinn::{
-    Connecting, Endpoint, EndpointConfig, MtuDiscoveryConfig, congestion::BbrConfig, crypto::rustls::{QuicClientConfig, QuicServerConfig}, rustls::{self, version::TLS13}
+    Connecting, Endpoint, EndpointConfig, MtuDiscoveryConfig,
+    congestion::BbrConfig,
+    crypto::rustls::{QuicClientConfig, QuicServerConfig},
+    rustls::{self, version::TLS13},
 };
-use tun_rs::DeviceBuilder;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use tun_rs::DeviceBuilder;
 
-use kqt::{cert::{LiteCertVerifier, ParsedKeypair, ParsedTrustAnchor}, packet::populate_packet_too_big, *};
 use kqt::peers::Peers;
+use kqt::{
+    crypto::{LiteCertVerifier, ParsedKeypair, ParsedTrustAnchor},
+    packet::populate_packet_too_big,
+    *,
+};
 
 const KQT_PROTO_VERSION: &'static [u8] = b"kqt/0.1";
 const ETH_HDR_LEN: usize = 14;
@@ -106,9 +113,7 @@ async fn main() -> anyhow::Result<!> {
 
     let mut endpoint_cfg = EndpointConfig::new(Arc::new(kp.to_hmac_key()));
     let cloned_kp = kp.clone();
-    endpoint_cfg.cid_generator(move || {
-        Box::new(cloned_kp.to_cid_generator())
-    });
+    endpoint_cfg.cid_generator(move || Box::new(cloned_kp.to_cid_generator()));
     let mut endpoint = quinn::Endpoint::new(
         endpoint_cfg,
         server_cfg,
@@ -136,21 +141,19 @@ async fn main() -> anyhow::Result<!> {
         DeviceBuilder::new()
             .name(&args.name)
             .layer(tun_rs::Layer::L2)
-            .build_async()?
+            .build_async()?,
     );
     if let Some(mtu) = cfg.mtu {
         device.set_mtu(mtu)?;
     }
     for addr in cfg.address {
         match addr {
-            cidr::IpInet::V4(cidr) => device.add_address_v4(
-                cidr.address(),
-                cidr.network_length()
-            )?,
-            cidr::IpInet::V6(cidr) => device.add_address_v6(
-                cidr.address(),
-                cidr.network_length(),
-            )?,
+            cidr::IpInet::V4(cidr) => {
+                device.add_address_v4(cidr.address(), cidr.network_length())?
+            }
+            cidr::IpInet::V6(cidr) => {
+                device.add_address_v6(cidr.address(), cidr.network_length())?
+            }
         }
     }
     let store = Peers::new();
@@ -189,7 +192,11 @@ async fn main() -> anyhow::Result<!> {
                             tracing::debug!("Handling Packet Too Big");
                             let ip_pkt = &buf[ETH_HDR_LEN..]; // Skip Ethernet header
                             let mut resp_buf = vec![0u8; 1500 + ETH_HDR_LEN];
-                            if let Some(len) = populate_packet_too_big(mtu - ETH_HDR_LEN, ip_pkt, &mut resp_buf[ETH_HDR_LEN..])? {
+                            if let Some(len) = populate_packet_too_big(
+                                mtu - ETH_HDR_LEN,
+                                ip_pkt,
+                                &mut resp_buf[ETH_HDR_LEN..],
+                            )? {
                                 resp_buf[0..6].copy_from_slice(&buf[6..12]);
                                 resp_buf[6..12].fill(0);
                                 resp_buf[13..14].copy_from_slice(&buf[13..14]);
@@ -230,8 +237,8 @@ async fn handle_target(
                 // Server restart, immediately retry
                 tracing::info!("Server reset, retrying");
                 continue;
-            },
-            _ => {},
+            }
+            _ => {}
         }
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
     }

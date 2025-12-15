@@ -1,21 +1,30 @@
 use rand_core::RngCore;
 
-fn populate_ipv4_packet_too_big(mtu: usize, orig: &[u8], buf: &mut [u8]) -> anyhow::Result<Option<usize>> {
+fn populate_ipv4_packet_too_big(
+    mtu: usize,
+    orig: &[u8],
+    buf: &mut [u8],
+) -> anyhow::Result<Option<usize>> {
     use pnet::packet::icmp::IcmpTypes;
-    use pnet::packet::icmp::destination_unreachable::{IcmpCodes, MutableDestinationUnreachablePacket};
+    use pnet::packet::icmp::destination_unreachable::{
+        IcmpCodes, MutableDestinationUnreachablePacket,
+    };
     use pnet::packet::ip::IpNextHeaderProtocols;
-    use pnet::packet::ipv4::{Ipv4Flags, Ipv4Packet};
     use pnet::packet::ipv4::MutableIpv4Packet;
+    use pnet::packet::ipv4::{Ipv4Flags, Ipv4Packet};
     use pnet::packet::{MutablePacket, Packet};
 
-    let Some(ipv4_orig) = Ipv4Packet::new(orig) else { return Ok(None); };
+    let Some(ipv4_orig) = Ipv4Packet::new(orig) else {
+        return Ok(None);
+    };
     if ipv4_orig.get_flags() & Ipv4Flags::DontFragment == 0 {
         // No need for ICMP, simply drop
         return Ok(None);
     }
 
     // Prepare ICMPv4 Destination Unreachable (Fragmentation Needed and DF set)
-    let mut ipv4 = MutableIpv4Packet::new(buf).ok_or_else(|| anyhow::anyhow!("Buffer too short"))?;
+    let mut ipv4 =
+        MutableIpv4Packet::new(buf).ok_or_else(|| anyhow::anyhow!("Buffer too short"))?;
     ipv4.set_version(4);
     ipv4.set_source(ipv4_orig.get_destination());
     ipv4.set_destination(ipv4_orig.get_source());
@@ -34,7 +43,8 @@ fn populate_ipv4_packet_too_big(mtu: usize, orig: &[u8], buf: &mut [u8]) -> anyh
     // Set payload
     ipv4.set_next_level_protocol(IpNextHeaderProtocols::Icmp);
     let ipv4_payload = ipv4.payload_mut();
-    let mut icmpv4 = MutableDestinationUnreachablePacket::new(ipv4_payload).ok_or_else(|| anyhow::anyhow!("Buffer too short"))?;
+    let mut icmpv4 = MutableDestinationUnreachablePacket::new(ipv4_payload)
+        .ok_or_else(|| anyhow::anyhow!("Buffer too short"))?;
 
     icmpv4.set_icmp_type(IcmpTypes::DestinationUnreachable);
     icmpv4.set_icmp_code(IcmpCodes::FragmentationRequiredAndDFFlagSet);
@@ -60,15 +70,22 @@ fn populate_ipv4_packet_too_big(mtu: usize, orig: &[u8], buf: &mut [u8]) -> anyh
     Ok(Some(tot_length))
 }
 
-fn populate_ipv6_packet_too_big(mtu: usize, orig: &[u8], buf: &mut [u8]) -> anyhow::Result<Option<usize>> {
-    use pnet::packet::icmpv6::{Icmpv6Types, Icmpv6Code, MutableIcmpv6Packet};
+fn populate_ipv6_packet_too_big(
+    mtu: usize,
+    orig: &[u8],
+    buf: &mut [u8],
+) -> anyhow::Result<Option<usize>> {
+    use pnet::packet::icmpv6::{Icmpv6Code, Icmpv6Types, MutableIcmpv6Packet};
     use pnet::packet::ipv6::{Ipv6Packet, MutableIpv6Packet};
     use pnet::packet::{MutablePacket, Packet};
 
-    let Some(ipv6_orig) = Ipv6Packet::new(orig) else { return Ok(None); };
+    let Some(ipv6_orig) = Ipv6Packet::new(orig) else {
+        return Ok(None);
+    };
 
     // Prepare ICMPv6 Packet Too Big
-    let mut ipv6 = MutableIpv6Packet::new(buf).ok_or_else(|| anyhow::anyhow!("Buffer too short"))?;
+    let mut ipv6 =
+        MutableIpv6Packet::new(buf).ok_or_else(|| anyhow::anyhow!("Buffer too short"))?;
     ipv6.set_source(ipv6_orig.get_destination());
     ipv6.set_destination(ipv6_orig.get_source());
     // Set other fields
@@ -82,7 +99,8 @@ fn populate_ipv6_packet_too_big(mtu: usize, orig: &[u8], buf: &mut [u8]) -> anyh
     // Set payload
     ipv6.set_next_header(pnet::packet::ip::IpNextHeaderProtocols::Icmpv6);
     let ipv6_payload = ipv6.payload_mut();
-    let mut icmpv6 = MutableIcmpv6Packet::new(ipv6_payload).ok_or_else(|| anyhow::anyhow!("Buffer too short"))?;
+    let mut icmpv6 = MutableIcmpv6Packet::new(ipv6_payload)
+        .ok_or_else(|| anyhow::anyhow!("Buffer too short"))?;
 
     icmpv6.set_icmpv6_type(Icmpv6Types::PacketTooBig);
     icmpv6.set_icmpv6_code(Icmpv6Code(0));
@@ -106,7 +124,11 @@ fn populate_ipv6_packet_too_big(mtu: usize, orig: &[u8], buf: &mut [u8]) -> anyh
     Ok(Some(40 + payload_length))
 }
 
-pub fn populate_packet_too_big(mtu: usize, orig: &[u8], buf: &mut [u8]) -> anyhow::Result<Option<usize>> {
+pub fn populate_packet_too_big(
+    mtu: usize,
+    orig: &[u8],
+    buf: &mut [u8],
+) -> anyhow::Result<Option<usize>> {
     match orig.get(0) {
         Some(b) if (b >> 4) == 4 => populate_ipv4_packet_too_big(mtu, orig, buf),
         Some(b) if (b >> 4) == 6 => populate_ipv6_packet_too_big(mtu, orig, buf),

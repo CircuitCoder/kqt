@@ -2,11 +2,14 @@ use std::{collections::HashMap, str::FromStr, time::Duration};
 
 use base64::Engine;
 use ed25519_dalek::Signer;
-use quinn::{ConnectionId, ConnectionIdGenerator, rustls::{
-    client::danger::*,
-    pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
-    server::danger::{ClientCertVerified, ClientCertVerifier},
-}};
+use quinn::{
+    ConnectionId, ConnectionIdGenerator,
+    rustls::{
+        client::danger::*,
+        pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
+        server::danger::{ClientCertVerified, ClientCertVerifier},
+    },
+};
 use quinn_proto::InvalidCid;
 use x509_cert::{
     der::{Decode, Encode, asn1::BitString},
@@ -491,7 +494,6 @@ impl ClientCertVerifier for LiteCertVerifier {
     }
 }
 
-
 const CID_KEY_LEN: usize = 8;
 const CID_NONCE_LEN: usize = 8;
 const CID_SIG_LEN: usize = 8;
@@ -511,7 +513,6 @@ impl CIDGenerator {
 
 impl ConnectionIdGenerator for CIDGenerator {
     fn generate_cid(&mut self) -> ConnectionId {
-
         use rand_core::RngCore;
 
         let mut buf = [0; CID_NONCE_LEN + CID_SIG_LEN];

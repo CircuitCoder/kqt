@@ -2,8 +2,8 @@ use base64::Engine;
 use clap::{Parser, Subcommand, ValueEnum};
 use x509_cert::der::{EncodePem, pem::LineEnding};
 
-use kqt::cert;
-use kqt::cert::ParsedKeypair;
+use kqt::crypto;
+use kqt::crypto::ParsedKeypair;
 
 #[derive(ValueEnum, Clone)]
 enum OutputFormat {
@@ -76,8 +76,8 @@ fn main() -> anyhow::Result<()> {
             let issuer_pk = issuer_sk.verifying_key();
 
             // Generate TBS cert
-            let tbs = cert::recover_tbs_cert(pk, issuer_pk, &suffix)?;
-            let sig = cert::sign_cert(&tbs, &issuer_sk)?;
+            let tbs = crypto::recover_tbs_cert(pk, issuer_pk, &suffix)?;
+            let sig = crypto::sign_cert(&tbs, &issuer_sk)?;
 
             let key_buflen = ed25519_dalek::SECRET_KEY_LENGTH / 2 * 3 + 1;
             let sig_bytes = sig.to_bytes();
