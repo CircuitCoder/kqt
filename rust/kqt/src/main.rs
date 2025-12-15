@@ -220,10 +220,18 @@ async fn handle_target(
             handle_connection(conn, device.clone(), store.clone()).await?
         };
         tracing::error!("Outgoing connection to {} closed: {}", addr, err);
-        if let Ok(quinn::ConnectionError::TimedOut) = err.downcast::<quinn::ConnectionError>() {
-            // Immediately retry on timeout
-            tracing::info!("Timed out, retrying");
-            continue;
+        match err.downcast::<quinn::ConnectionError>() {
+            Ok(quinn::ConnectionError::TimedOut) => {
+                // Immediately retry on timeout
+                tracing::info!("Timed out, retrying");
+                continue;
+            }
+            Ok(quinn::ConnectionError::Reset) => {
+                // Server restart, immediately retry
+                tracing::info!("Server reset, retrying");
+                continue;
+            },
+            _ => {},
         }
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
     }
