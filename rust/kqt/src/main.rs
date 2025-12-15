@@ -182,6 +182,7 @@ async fn main() -> anyhow::Result<!> {
         let len: usize = device.recv(&mut buf).await?;
         loop {
             if let Err(e) = store.send(&buf[..len]).await {
+                tracing::warn!("Error sending datagram: {:?}", e);
                 match e {
                     peers::SendError::PacketTooBig { mtu } => {
                         if mtu >= len {
@@ -198,8 +199,8 @@ async fn main() -> anyhow::Result<!> {
                                 &mut resp_buf[ETH_HDR_LEN..],
                             )? {
                                 resp_buf[0..6].copy_from_slice(&buf[6..12]);
-                                resp_buf[6..12].fill(0);
-                                resp_buf[13..14].copy_from_slice(&buf[13..14]);
+                                resp_buf[6..12].copy_from_slice(&buf[0..6]);
+                                resp_buf[12..14].copy_from_slice(&buf[12..14]);
                                 device.send(&resp_buf[..len + ETH_HDR_LEN]).await?;
                             }
                         }
@@ -274,7 +275,7 @@ async fn handle_connection(
             }
 
             // Also, parse the source MAC address
-            if let Some(mac) = dgram.get(7..12).and_then(|s| s.try_into().ok()) {
+            if let Some(mac) = dgram.get(6..12).and_then(|s| s.try_into().ok()) {
                 let mac_addr = peers::MACAddr(mac);
                 // Register the connection with the MAC address
                 store.link(id, conn.clone(), mac_addr).await;

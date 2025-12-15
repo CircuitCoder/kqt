@@ -45,6 +45,18 @@ impl Peers {
     }
 
     pub async fn link(&self, id: usize, conn: Connection, mac: MACAddr) {
+        let inner = self.0.read().await;
+        // Avoid costly locking if already linked
+        if inner.linked.contains_key(&mac) {
+            return;
+        }
+        drop(inner);
+        tracing::debug!(
+            "Linking MAC {} to connection {} -> {}",
+            hex::encode(mac.0),
+            id,
+            conn.remote_address()
+        );
         let mut inner = self.0.write().await;
         inner.linked.insert(mac, (id, conn));
     }
@@ -61,10 +73,11 @@ impl Peers {
         let specific = data
             .get(0..6)
             .and_then(|s| inner.linked.get(&MACAddr(s.try_into().unwrap())));
-        tracing::debug!("[SEND] {}", data.len());
         if let Some((_, conn)) = specific {
+            tracing::debug!("[SEND {}] {}", conn.remote_address(), data.len());
             Self::send_to(data, conn)
         } else {
+            tracing::debug!("[BROADCAST] {}", data.len());
             for (_, conn) in inner.id.iter() {
                 let _ = Self::send_to(data, conn);
             }
@@ -81,7 +94,7 @@ impl Peers {
         let cur_max_dgram_size = cur_max_dgram_size.unwrap();
 
         if let Err(e) = conn.send_datagram(data.to_owned().into()) {
-            tracing::warn!("[SEND {}] Failed: {}", conn.remote_address(), e);
+            tracing::debug!("[SEND {}] Failed: {}", conn.remote_address(), e);
 
             match e {
                 quinn::SendDatagramError::TooLarge => Err(SendError::PacketTooBig {
