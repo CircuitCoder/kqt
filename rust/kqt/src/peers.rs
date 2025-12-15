@@ -85,7 +85,7 @@ impl Peers {
 
             match e {
                 quinn::SendDatagramError::TooLarge => Err(SendError::PacketTooBig{ mtu: cur_max_dgram_size }),
-                e => Err(SendError::Unknown(e)),
+                e => Err(e.into())
             }
         } else {
             Ok(())

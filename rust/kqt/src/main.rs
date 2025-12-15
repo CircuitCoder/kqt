@@ -7,6 +7,7 @@ use quinn::{
     crypto::rustls::{QuicClientConfig, QuicServerConfig},
     rustls::{self, version::TLS13},
 };
+use tun_rs::DeviceBuilder;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use kqt::{packet::populate_packet_too_big, *};
@@ -118,13 +119,10 @@ async fn main() -> anyhow::Result<!> {
     tracing::debug!("Endpoints created");
 
     let device = Arc::new(
-        tokio_tun::TunBuilder::new()
+        DeviceBuilder::new()
             .name(&args.name)
-            .tap()
-            .up()
-            .build()?
-            .pop()
-            .unwrap(),
+            .layer(tun_rs::Layer::L2)
+            .build_async()?
     );
     let store = Peers::new();
 
@@ -148,15 +146,8 @@ async fn main() -> anyhow::Result<!> {
     let mut buf = Vec::new();
     loop {
         let mtu = device.mtu()?;
-        if mtu > 65536 {
-            tracing::error!(
-                "MTU is too large: {}. Maximum supported MTU is 65536 bytes.",
-                mtu
-            );
-            std::process::exit(1);
-        }
         buf.resize(mtu as usize + 18, 0);
-        let len = device.recv(&mut buf).await?;
+        let len: usize = device.recv(&mut buf).await?;
         loop {
             if let Err(e) = store.send(&buf[..len]).await {
                 match e {
@@ -208,7 +199,7 @@ fn create_server_endpoint(
 
 async fn handle_target(
     ep: Endpoint,
-    device: Arc<tokio_tun::Tun>,
+    device: Arc<tun_rs::AsyncDevice>,
     addr: SocketAddr,
     store: Peers,
 ) -> ! {
@@ -230,7 +221,7 @@ async fn handle_target(
 
 async fn handle_connection(
     conn: Connecting,
-    device: Arc<tokio_tun::Tun>,
+    device: Arc<tun_rs::AsyncDevice>,
     store: Peers,
 ) -> anyhow::Result<!> {
     let conn = conn.await?;
@@ -271,7 +262,7 @@ async fn handle_connection(
 
 async fn handle_server(
     ep: Endpoint,
-    device: Arc<tokio_tun::Tun>,
+    device: Arc<tun_rs::AsyncDevice>,
     store: Peers,
 ) -> anyhow::Result<()> {
     tracing::info!("Listening on {}", ep.local_addr()?);
