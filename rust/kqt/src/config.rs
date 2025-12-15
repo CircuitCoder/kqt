@@ -11,6 +11,13 @@ pub struct Config {
     /// Suffix used in certificate verification
     pub suffix: String,
 
+    /// System MTU
+    pub mtu: Option<u16>,
+
+    /// IP Addresses
+    #[serde(default)]
+    pub address: Vec<cidr::IpInet>,
+
     /// Enable server mode
     pub listen: Option<SocketAddr>,
     /// Connect to remote endpoint

@@ -124,6 +124,21 @@ async fn main() -> anyhow::Result<!> {
             .layer(tun_rs::Layer::L2)
             .build_async()?
     );
+    if let Some(mtu) = cfg.mtu {
+        device.set_mtu(mtu)?;
+    }
+    for addr in cfg.address {
+        match addr {
+            cidr::IpInet::V4(cidr) => device.add_address_v4(
+                cidr.address(),
+                cidr.network_length()
+            )?,
+            cidr::IpInet::V6(cidr) => device.add_address_v6(
+                cidr.address(),
+                cidr.network_length(),
+            )?,
+        }
+    }
     let store = Peers::new();
 
     tracing::debug!("Device created");
