@@ -2,16 +2,13 @@
 
 use clap::Parser;
 use quinn::{
-    Connecting, Endpoint, MtuDiscoveryConfig,
-    congestion::BbrConfig,
-    crypto::rustls::{QuicClientConfig, QuicServerConfig},
-    rustls::{self, version::TLS13},
+    Connecting, Endpoint, EndpointConfig, MtuDiscoveryConfig, congestion::BbrConfig, crypto::rustls::{QuicClientConfig, QuicServerConfig}, rustls::{self, version::TLS13}
 };
 use tun_rs::DeviceBuilder;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
-use kqt::{packet::populate_packet_too_big, *};
-use kqt::{cert::LiteCertVerifier, peers::Peers};
+use kqt::{cert::{LiteCertVerifier, ParsedKeypair, ParsedTrustAnchor}, packet::populate_packet_too_big, *};
+use kqt::peers::Peers;
 
 const KQT_PROTO_VERSION: &'static [u8] = b"kqt/0.1";
 const ETH_HDR_LEN: usize = 14;
@@ -64,10 +61,10 @@ async fn main() -> anyhow::Result<!> {
     let trusts = cfg
         .anchor
         .iter()
-        .map(|t| cert::ParsedTrustAnchor::try_from(t.as_str()).map(|e| e.0));
-    let verifier = cert::LiteCertVerifier::try_new(cfg.suffix.clone(), trusts)?;
+        .map(|t| ParsedTrustAnchor::try_from(t.as_str()).map(|e| e.0));
+    let verifier = LiteCertVerifier::try_new(cfg.suffix.clone(), trusts)?;
     let verifier = Arc::new(verifier);
-    let kp = cert::ParsedKeypair::try_from(cfg.keypair.as_str())?;
+    let kp = ParsedKeypair::try_from(cfg.keypair.as_str())?;
 
     let mut transport = quinn::TransportConfig::default();
     let mut mtu_discovery = MtuDiscoveryConfig::default();
@@ -90,17 +87,34 @@ async fn main() -> anyhow::Result<!> {
     }
     let transport = Arc::new(transport);
 
-    let mut endpoint = if let Some(listen) = cfg.listen {
-        create_server_endpoint(
-            listen,
-            verifier.clone(),
-            kp.clone(),
-            &cfg.suffix,
-            transport.clone(),
-        )?
+    let (server_cfg, udp_sock) = if let Some(listen) = cfg.listen {
+        let (cert, key) = kp.clone().try_into_rustls(&cfg.suffix)?;
+        let mut server_crypto = rustls::ServerConfig::builder_with_protocol_versions(&[&TLS13])
+            .with_client_cert_verifier(verifier.clone())
+            .with_single_cert(vec![cert], key)?;
+        server_crypto.alpn_protocols = vec![KQT_PROTO_VERSION.to_vec()];
+        let mut server_cfg =
+            quinn::ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(server_crypto)?));
+        server_cfg.transport_config(transport.clone());
+
+        let udp_sock = std::net::UdpSocket::bind(listen)?;
+        (Some(server_cfg), udp_sock)
     } else {
-        quinn::Endpoint::client((std::net::Ipv6Addr::UNSPECIFIED, 0).into())?
+        let udp_sock = std::net::UdpSocket::bind((std::net::Ipv6Addr::UNSPECIFIED, 0))?;
+        (None, udp_sock)
     };
+
+    let mut endpoint_cfg = EndpointConfig::new(Arc::new(kp.to_hmac_key()));
+    let cloned_kp = kp.clone();
+    endpoint_cfg.cid_generator(move || {
+        Box::new(cloned_kp.to_cid_generator())
+    });
+    let mut endpoint = quinn::Endpoint::new(
+        endpoint_cfg,
+        server_cfg,
+        udp_sock,
+        quinn::default_runtime().expect("No built-in runtime for quinn"),
+    )?;
 
     let (cert, sk) = kp.try_into_rustls(&cfg.suffix)?;
 
@@ -191,25 +205,6 @@ async fn main() -> anyhow::Result<!> {
             break;
         }
     }
-}
-
-fn create_server_endpoint(
-    listen: SocketAddr,
-    verifier: Arc<LiteCertVerifier>,
-    kp: cert::ParsedKeypair,
-    suffix: &str,
-    transport: Arc<quinn::TransportConfig>,
-) -> anyhow::Result<Endpoint> {
-    let (cert, key) = kp.try_into_rustls(suffix)?;
-    let mut server_crypto = rustls::ServerConfig::builder_with_protocol_versions(&[&TLS13])
-        .with_client_cert_verifier(verifier)
-        .with_single_cert(vec![cert], key)?;
-    server_crypto.alpn_protocols = vec![KQT_PROTO_VERSION.to_vec()];
-    let mut server_cfg =
-        quinn::ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(server_crypto)?));
-    server_cfg.transport_config(transport);
-    let ep = quinn::Endpoint::server(server_cfg, listen)?;
-    Ok(ep)
 }
 
 async fn handle_target(

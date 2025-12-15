@@ -1,12 +1,13 @@
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::HashMap, str::FromStr, time::Duration};
 
 use base64::Engine;
 use ed25519_dalek::Signer;
-use quinn::rustls::{
+use quinn::{ConnectionId, ConnectionIdGenerator, rustls::{
     client::danger::*,
     pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
     server::danger::{ClientCertVerified, ClientCertVerifier},
-};
+}};
+use quinn_proto::InvalidCid;
 use x509_cert::{
     der::{Decode, Encode, asn1::BitString},
     ext::{AsExtension, pkix::BasicConstraints},
@@ -151,6 +152,20 @@ impl ParsedKeypair {
         let key_der = self.sk.to_pkcs8_der()?;
         let key_der = PrivatePkcs8KeyDer::from(key_der.as_bytes().to_vec());
         Ok((cert_der, key_der.into()))
+    }
+
+    pub fn to_hmac_key(&self) -> ring::hmac::Key {
+        const DUMMY_STRING: &'static [u8] = b"KQT-DUMMY-HMAC-KEY/1";
+        let sig = self.sk.sign(DUMMY_STRING);
+        let key_bytes = sig.r_bytes();
+        ring::hmac::Key::new(ring::hmac::HMAC_SHA256, key_bytes)
+    }
+
+    pub fn to_cid_generator(&self) -> CIDGenerator {
+        let sig = self.sk.sign(b"KQT-DUMMY-CID-GENERATOR/1");
+        let mut key = [0; CID_KEY_LEN];
+        key.copy_from_slice(&sig.r_bytes()[..CID_KEY_LEN]);
+        CIDGenerator { key }
     }
 }
 
@@ -473,5 +488,55 @@ impl ClientCertVerifier for LiteCertVerifier {
     ) -> Result<HandshakeSignatureValid, quinn::rustls::Error> {
         self.verify_signature(message, cert, dss)?;
         Ok(HandshakeSignatureValid::assertion())
+    }
+}
+
+
+const CID_KEY_LEN: usize = 8;
+const CID_NONCE_LEN: usize = 8;
+const CID_SIG_LEN: usize = 8;
+pub struct CIDGenerator {
+    key: [u8; CID_KEY_LEN],
+}
+
+impl CIDGenerator {
+    pub fn compute_hash(&self, input: &[u8], output: &mut [u8]) {
+        let mut ctx = ring::digest::Context::new(&ring::digest::SHA256);
+        ctx.update(&self.key);
+        ctx.update(input);
+        let digest = ctx.finish();
+        output.copy_from_slice(&digest.as_ref()[..output.len()]);
+    }
+}
+
+impl ConnectionIdGenerator for CIDGenerator {
+    fn generate_cid(&mut self) -> ConnectionId {
+
+        use rand_core::RngCore;
+
+        let mut buf = [0; CID_NONCE_LEN + CID_SIG_LEN];
+        let (nonce, sig) = buf.split_at_mut(CID_NONCE_LEN);
+        rand_core::OsRng.fill_bytes(nonce);
+        self.compute_hash(nonce, sig);
+        ConnectionId::new(&buf)
+    }
+
+    fn validate(&self, cid: &ConnectionId) -> Result<(), InvalidCid> {
+        let (nonce, sig) = cid.split_at(CID_NONCE_LEN);
+        let mut expected = [0; CID_SIG_LEN];
+        self.compute_hash(nonce, &mut expected);
+        if expected == sig {
+            Ok(())
+        } else {
+            Err(InvalidCid)
+        }
+    }
+
+    fn cid_len(&self) -> usize {
+        CID_NONCE_LEN + CID_SIG_LEN
+    }
+
+    fn cid_lifetime(&self) -> Option<Duration> {
+        None
     }
 }
