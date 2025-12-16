@@ -11,7 +11,7 @@ base64 = "0.22.1"
 clap = { version = "4.5.40", features = ["derive"] }
 ed25519-dalek = { version = "2.2.0", features = ["pkcs8", "rand_core"] }
 hex = "0.4.3"
-quinn = "0.11.8"
+quinn = "0.11.9"
 quinn-proto = "*"
 rand_core = { version = "0.6.4", features = ["getrandom"] }
 tokio = { version = "1.46", features = ["net", "rt-multi-thread", "rt", "macros"] }

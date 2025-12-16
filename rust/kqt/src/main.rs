@@ -254,7 +254,7 @@ async fn handle_connection(
     let mds = conn.max_datagram_size();
     let addr = conn.remote_address();
     tracing::info!("New connection from {}, max dgram size {:?}", addr, mds);
-    let id = store.register(conn.clone()).await;
+    store.register(conn.clone()).await;
 
     let ret = try {
         loop {
@@ -278,11 +278,11 @@ async fn handle_connection(
             if let Some(mac) = dgram.get(6..12).and_then(|s| s.try_into().ok()) {
                 let mac_addr = peers::MACAddr(mac);
                 // Register the connection with the MAC address
-                store.link(id, conn.clone(), mac_addr).await;
+                store.link(mac_addr, &conn).await;
             }
         }
     };
-    store.unregister(id).await;
+    store.unregister(&conn).await;
     ret
 }
 
