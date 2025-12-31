@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use rand_core::RngCore;
 
 const ETH_HDR_LEN: usize = 14;
@@ -268,4 +270,153 @@ pub fn move_frag_headers(sent: usize, packet: &mut [u8]) -> &mut [u8] {
     let new_offset = old_offset + (dist / 8) as u16;
     ipv4.set_fragment_offset(new_offset);
     new_pkt
+}
+
+use pnet::packet::ip::IpNextHeaderProtocols;
+use pnet::packet::ipv4::Ipv4Packet;
+use pnet::packet::ipv6::Ipv6Packet;
+use pnet::packet::tcp::{TcpOptionNumbers, TcpPacket};
+
+/// Clamps the TCP MSS option in an Ethernet frame to the specified value.
+/// Updates the TCP checksum incrementally if modification is performed.
+/// Returns the indices of the MSS option and the chksum
+pub fn clamp_mss<'s>(pkt: &'s [u8], outer_mtu: usize) -> Cow<'s, [u8]> {
+    let mut pkt = Cow::Borrowed(pkt);
+    // Parse IP Header and find start of TCP
+    let Some(ip_ver) = pkt.get(ETH_HDR_LEN).map(|b| b >> 4) else {
+        return pkt;
+    };
+    let tcp_offset = match ip_ver {
+        4 => {
+            let Some(ipv4) = Ipv4Packet::new(&pkt[ETH_HDR_LEN..]) else {
+                return pkt;
+            };
+            if ipv4.get_next_level_protocol() != IpNextHeaderProtocols::Tcp {
+                return pkt;
+            }
+            ETH_HDR_LEN + ipv4.get_header_length() as usize * 4
+        }
+        6 => {
+            let Some(ipv6) = Ipv6Packet::new(&pkt[ETH_HDR_LEN..]) else {
+                return pkt;
+            };
+            if ipv6.get_next_header() != IpNextHeaderProtocols::Tcp {
+                return pkt;
+            }
+            ETH_HDR_LEN + IPV6_HDR_LEN
+        }
+        _ => return pkt, // Unknown IP version
+    };
+    let tcp_pkt = &pkt[tcp_offset..];
+
+    // We create a scope here to borrow the TCP portion mutably
+    let tcp = match TcpPacket::new(tcp_pkt) {
+        Some(t) => t,
+        None => return pkt,
+    };
+
+    // Calculate TCP Options length: (Data Offset * 4) - 20 bytes fixed header
+    let data_offset = tcp.get_data_offset();
+    let tcp_header_len = (data_offset as usize) * 4;
+
+    if tcp_header_len <= 20 {
+        return pkt; // No options present
+    }
+
+    let options_len = tcp_header_len - 20;
+
+    // 4. Iterate over TCP Options
+    // We access the raw byte slice of the options to avoid expensive Vec allocation
+    let mut i = 0;
+
+    // The options start at byte 20 of the TCP header
+    while i < options_len {
+        // Option offset relative to TCP header start
+        let opt_idx: usize = 20 + i;
+
+        // Safety check bounds
+        let Some(kind) = tcp_pkt.get(opt_idx).copied() else {
+            break;
+        };
+
+        if kind == 0 {
+            break; // EOL (End of List)
+        }
+
+        if kind == 1 {
+            // NOP (No Operation), length 1
+            i += 1;
+            continue;
+        }
+
+        // TLV Options (Type, Length, Value)
+        let Some(len) = tcp_pkt.get(opt_idx + 1).copied() else {
+            break;
+        };
+        let len = len as usize;
+
+        // Malformed option length checks
+        if len < 2 || opt_idx + len > 20 + options_len {
+            break;
+        }
+
+        // Check for MSS Option (Kind = 2, Length = 4)
+        if kind == TcpOptionNumbers::MSS.0 && len == 4 {
+            // Extract current MSS (Big Endian)
+            let old_mss = u16::from_be_bytes(tcp_pkt[opt_idx + 2..opt_idx + 4].try_into().unwrap());
+            let target_mss = (outer_mtu - tcp_offset - 20) as u16;
+
+            if old_mss > target_mss {
+                // 5. Update MSS and Checksum
+                // Write new MSS
+                let new_mss_bytes = target_mss.to_be_bytes();
+                let tcp_pkt_mut = &mut pkt.to_mut()[tcp_offset..];
+                tcp_pkt_mut[opt_idx + 2] = new_mss_bytes[0];
+                tcp_pkt_mut[opt_idx + 3] = new_mss_bytes[1];
+
+                // Read current checksum
+                let old_csum = u16::from_be_bytes([tcp_pkt_mut[16], tcp_pkt_mut[17]]);
+
+                // Calculate new checksum incrementally (RFC 1624 Eq. 3)
+                // HC' = ~(~HC + ~m + m')
+                let new_csum = checksum_incremental_update(old_csum, old_mss, target_mss);
+
+                // Write new checksum
+                let new_csum_bytes = new_csum.to_be_bytes();
+                tcp_pkt_mut[16] = new_csum_bytes[0];
+                tcp_pkt_mut[17] = new_csum_bytes[1];
+
+                // We found and updated the MSS, we can stop
+                return pkt;
+            }
+        }
+
+        i += len;
+    }
+    pkt
+}
+
+/// Implements incremental checksum update (RFC 1624).
+///
+/// `old_csum`: The original checksum field value.
+/// `old_val`: The 16-bit value that was replaced.
+/// `new_val`: The 16-bit value that replaced `old_val`.
+fn checksum_incremental_update(old_csum: u16, old_val: u16, new_val: u16) -> u16 {
+    // 1. Negate the old checksum (one's complement)
+    let csum_not = (!old_csum) as u32;
+
+    // 2. Add the negation of the old value (effectively subtracting it)
+    let old_val_not = (!old_val) as u32;
+
+    // 3. Add the new value
+    let new_val_u32 = new_val as u32;
+
+    let mut sum = csum_not + old_val_not + new_val_u32;
+
+    // Fold carry bits
+    sum = (sum & 0xFFFF) + (sum >> 16);
+    sum = (sum & 0xFFFF) + (sum >> 16); // Fold again in case the first fold created a carry
+
+    // Invert the result
+    !(sum as u16)
 }

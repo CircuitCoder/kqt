@@ -7,12 +7,12 @@ use quinn::{
     crypto::rustls::{QuicClientConfig, QuicServerConfig},
     rustls::{self, version::TLS13},
 };
-use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{borrow::Cow, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tun_rs::DeviceBuilder;
 
 use kqt::{
     crypto::{LiteCertVerifier, ParsedKeypair, ParsedTrustAnchor},
-    packet::{has_more_frag, populate_packet_too_big},
+    packet::{clamp_mss, has_more_frag, populate_packet_too_big},
     *,
 };
 use kqt::{
@@ -289,8 +289,16 @@ async fn handle_connection(
                 tracing::warn!("Empty datagram received");
                 continue;
             }
+
+            // Clamp MSS
+            let patched = if let Some(mds) = conn.max_datagram_size() {
+                clamp_mss(dgram.as_ref(), mds)
+            } else {
+                Cow::Borrowed(dgram.as_ref())
+            };
+
             // Simply forward to tap
-            let written = device.send(dgram.as_ref()).await.map_err(Into::into)?;
+            let written = device.send(patched.as_ref()).await.map_err(Into::into)?;
             if written != dgram.len() {
                 tracing::warn!(
                     "Partial write to tap device, {} instead of {}",
