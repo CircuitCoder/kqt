@@ -32,7 +32,7 @@ fn populate_ipv4_packet_too_big(
     use pnet::packet::ipv4::MutableIpv4Packet;
     use pnet::packet::ipv4::{Ipv4Flags, Ipv4Packet};
 
-    let Some(ipv4_orig) = Ipv4Packet::new(&buf[..pkt_start]) else {
+    let Some(ipv4_orig) = Ipv4Packet::new(&buf[pkt_start + ETH_HDR_LEN..]) else {
         return Ok(None);
     };
     if ipv4_orig.get_flags() & Ipv4Flags::DontFragment == 0 {
@@ -44,7 +44,7 @@ fn populate_ipv4_packet_too_big(
     let ipv4_dst = ipv4_orig.get_source();
 
     // Move ethernet header backward
-    let new_pkt_start = pkt_start - (IPV6_HDR_LEN + ICMPV6_PACKET_TOO_BIG_WITH_MTU_LEN);
+    let new_pkt_start = pkt_start - (IPV4_HDR_LEN + ICMPV4_DESTINATION_UNREACHABLE_LEN);
     let (pkt_front, pkt_back) = buf.split_at_mut(pkt_start);
     let eth_src = &pkt_back[..ETH_HDR_LEN];
     let eth_dst: &mut [u8] = &mut pkt_front[new_pkt_start..new_pkt_start + ETH_HDR_LEN];
@@ -172,24 +172,26 @@ pub fn populate_packet_too_big(
     pkt_start: usize,
     pkt_len: usize,
 ) -> anyhow::Result<Option<&[u8]>> {
-    match buf.get(ETH_HDR_LEN) {
+    match buf.get(pkt_start + ETH_HDR_LEN) {
         Some(b) if (b >> 4) == 4 => {
             populate_ipv4_packet_too_big(outer_mtu, buf, pkt_start, pkt_len)
         }
         Some(b) if (b >> 4) == 6 => {
             populate_ipv6_packet_too_big(outer_mtu, buf, pkt_start, pkt_len)
         }
-        _ => return Ok(None),
+        _ => Ok(None),
     }
 }
 
-pub fn can_frag(packet: &[u8]) -> bool {
-    if packet
+fn is_v4(packet: &[u8]) -> bool {
+    packet
         .get(ETH_HDR_LEN)
-        .map(|b| (b >> 4) != 4)
-        .unwrap_or(true)
-    {
-        // Not IPv4
+        .map(|b| (b >> 4) == 4)
+        .unwrap_or(false)
+}
+
+pub fn can_frag(packet: &[u8]) -> bool {
+    if !is_v4(packet) {
         return false;
     }
 
@@ -201,15 +203,22 @@ pub fn can_frag(packet: &[u8]) -> bool {
     return (ipv4.get_flags() & pnet::packet::ipv4::Ipv4Flags::DontFragment) == 0;
 }
 
-pub fn frag_if_needed(outer_mtu: usize, packet: &mut [u8]) -> anyhow::Result<&[u8]> {
-    let final_len = packet.len().min(outer_mtu);
+pub fn frag_if_needed(
+    outer_mtu: usize,
+    packet: &mut [u8],
+    orig_frag: bool,
+) -> anyhow::Result<&[u8]> {
     let needs_frag = packet.len() > outer_mtu;
+    let final_len = if needs_frag {
+        // Calculate fragment size (must be multiple of 8)
+        let frag_size = (outer_mtu - ETH_HDR_LEN - IPV4_HDR_LEN) & !7;
+        assert!(frag_size >= 8);
+        ETH_HDR_LEN + IPV4_HDR_LEN + frag_size
+    } else {
+        packet.len()
+    };
 
-    if packet
-        .get(ETH_HDR_LEN)
-        .map(|b| (b >> 4) != 4)
-        .unwrap_or(true)
-    {
+    if !is_v4(packet) {
         // Not IPv4, nothing to do
         return Ok(packet);
     }
@@ -217,27 +226,46 @@ pub fn frag_if_needed(outer_mtu: usize, packet: &mut [u8]) -> anyhow::Result<&[u
     use pnet::packet::ipv4::MutableIpv4Packet;
     let mut ipv4 = MutableIpv4Packet::new(&mut packet[ETH_HDR_LEN..])
         .ok_or_else(|| anyhow::anyhow!("Invalid IPv4 packet"))?;
-    let flags = if needs_frag {
+    let flags = if needs_frag || orig_frag {
+        // Set More Fragments flag if we are fragmenting or if the original packet was fragmented
         ipv4.get_flags() | pnet::packet::ipv4::Ipv4Flags::MoreFragments
     } else {
         ipv4.get_flags() & !pnet::packet::ipv4::Ipv4Flags::MoreFragments
     };
     ipv4.set_flags(flags);
     ipv4.set_total_length((final_len - ETH_HDR_LEN) as u16);
+    // Reconculate checksum
+    let chksum = pnet::packet::ipv4::checksum(&ipv4.to_immutable());
+    ipv4.set_checksum(chksum);
     Ok(&packet[..final_len])
 }
 
+pub fn has_more_frag(packet: &[u8]) -> bool {
+    if !is_v4(packet) {
+        return false;
+    }
+
+    use pnet::packet::ipv4::Ipv4Packet;
+    let Some(ipv4) = Ipv4Packet::new(&packet[ETH_HDR_LEN..]) else {
+        return false;
+    };
+
+    (ipv4.get_flags() & pnet::packet::ipv4::Ipv4Flags::MoreFragments) != 0
+}
+
 pub fn move_frag_headers(sent: usize, packet: &mut [u8]) -> &mut [u8] {
-    assert!(
-        packet
-            .get(ETH_HDR_LEN)
-            .map(|b| (b >> 4) == 4)
-            .unwrap_or(false)
-    );
+    assert!(is_v4(packet));
     assert!(sent > ETH_HDR_LEN + IPV4_HDR_LEN);
-    let (pkt_front, pkt_back) = packet.split_at_mut(sent - (ETH_HDR_LEN + IPV4_HDR_LEN));
-    let hdr_src = &pkt_front[..ETH_HDR_LEN + IPV4_HDR_LEN];
-    let hdr_dst: &mut [u8] = &mut pkt_back[..ETH_HDR_LEN + IPV4_HDR_LEN];
-    hdr_dst.copy_from_slice(hdr_src);
-    pkt_back
+    let dist = sent - (ETH_HDR_LEN + IPV4_HDR_LEN);
+    packet.copy_within(..ETH_HDR_LEN + IPV4_HDR_LEN, dist);
+    let new_pkt = &mut packet[dist..];
+    // Bump fragment offset
+    use pnet::packet::ipv4::MutableIpv4Packet;
+    let mut ipv4 =
+        MutableIpv4Packet::new(&mut new_pkt[ETH_HDR_LEN..]).expect("Invalid IPv4 packet");
+    let old_offset = ipv4.get_fragment_offset();
+    assert!(dist % 8 == 0);
+    let new_offset = old_offset + (dist / 8) as u16;
+    ipv4.set_fragment_offset(new_offset);
+    new_pkt
 }

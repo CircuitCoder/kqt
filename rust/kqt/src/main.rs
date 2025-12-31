@@ -12,7 +12,7 @@ use tun_rs::DeviceBuilder;
 
 use kqt::{
     crypto::{LiteCertVerifier, ParsedKeypair, ParsedTrustAnchor},
-    packet::populate_packet_too_big,
+    packet::{has_more_frag, populate_packet_too_big},
     *,
 };
 use kqt::{
@@ -186,21 +186,28 @@ async fn main() -> anyhow::Result<!> {
         let len: usize = device.recv(&mut buf[FRONT_BUFFER..]).await?;
 
         let mut active = &mut buf[FRONT_BUFFER..FRONT_BUFFER + len];
-        let mut frag = len;
+        let mut frag = None;
+        let orig_frag = has_more_frag(active);
 
         loop {
             let active_len = active.len();
-            let sending = frag_if_needed(frag, active)?;
-            assert!(active_len >= sending.len());
+            // Don't frag on first try.
+            let sending = if let Some(frag) = frag {
+                frag_if_needed(frag, active, orig_frag)?
+            } else {
+                &active[..]
+            };
+            let sending_len = sending.len();
+            assert!(active_len >= sending_len);
             let sent = store.send(sending).await;
 
             let Err(e) = sent else {
                 // Sent successfully, check if more frags are present
-                if active_len == sending.len() {
+                if active_len == sending_len {
                     break;
                 }
 
-                active = move_frag_headers(sending.len(), active);
+                active = move_frag_headers(sending_len, active);
                 continue;
             };
 
@@ -214,13 +221,12 @@ async fn main() -> anyhow::Result<!> {
                 }
 
                 if can_frag(sending) {
-                    frag = mtu;
+                    frag = Some(mtu);
                     continue;
                 }
 
                 let pkt_start = sending.as_ptr() as usize - buf_start as usize;
-                let pkt_len = sending.len();
-                tracing::debug!("Handling Packet Too Big");
+                let pkt_len = sending_len;
                 if let Some(pkt) = populate_packet_too_big(mtu, &mut buf, pkt_start, pkt_len)? {
                     device.send(pkt).await?;
                 }
