@@ -1,4 +1,4 @@
-#![feature(never_type, try_blocks)]
+#![feature(never_type, try_blocks, try_trait_v2, substr_range)]
 
 use clap::Parser;
 use quinn::{
@@ -10,15 +10,17 @@ use quinn::{
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tun_rs::DeviceBuilder;
 
-use kqt::peers::Peers;
 use kqt::{
     crypto::{LiteCertVerifier, ParsedKeypair, ParsedTrustAnchor},
     packet::populate_packet_too_big,
     *,
 };
+use kqt::{
+    packet::{FRONT_BUFFER, can_frag, frag_if_needed, move_frag_headers},
+    peers::Peers,
+};
 
 const KQT_PROTO_VERSION: &'static [u8] = b"kqt/0.1";
-const ETH_HDR_LEN: usize = 14;
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -175,41 +177,58 @@ async fn main() -> anyhow::Result<!> {
         tokio::spawn(handle_server(endpoint, device.clone(), store.clone()));
     }
     // Handle tap send
+    // TODO: reuse buffer
     let mut buf = Vec::new();
     loop {
         let mtu = device.mtu()?;
-        buf.resize(mtu as usize + 18, 0);
-        let len: usize = device.recv(&mut buf).await?;
+        buf.resize(mtu as usize + 18 + FRONT_BUFFER, 0);
+        let buf_start = buf.as_ptr();
+        let len: usize = device.recv(&mut buf[FRONT_BUFFER..]).await?;
+
+        let mut active = &mut buf[FRONT_BUFFER..FRONT_BUFFER + len];
+        let mut frag = len;
+
         loop {
-            if let Err(e) = store.send(&buf[..len]).await {
-                tracing::warn!("Error sending datagram: {:?}", e);
-                match e {
-                    peers::SendError::PacketTooBig { mtu } => {
-                        if mtu >= len {
-                            // Retry
-                            // TODO: bound retry iterations?
-                            continue;
-                        } else {
-                            tracing::debug!("Handling Packet Too Big");
-                            let ip_pkt = &buf[ETH_HDR_LEN..]; // Skip Ethernet header
-                            let mut resp_buf = vec![0u8; 1500 + ETH_HDR_LEN];
-                            if let Some(len) = populate_packet_too_big(
-                                mtu - ETH_HDR_LEN,
-                                ip_pkt,
-                                &mut resp_buf[ETH_HDR_LEN..],
-                            )? {
-                                resp_buf[0..6].copy_from_slice(&buf[6..12]);
-                                resp_buf[6..12].copy_from_slice(&buf[0..6]);
-                                resp_buf[12..14].copy_from_slice(&buf[12..14]);
-                                device.send(&resp_buf[..len + ETH_HDR_LEN]).await?;
-                            }
-                        }
-                    }
-                    e => {
-                        tracing::error!("Error sending datagram: {:?}", e);
-                    }
+            let active_len = active.len();
+            let sending = frag_if_needed(frag, active)?;
+            assert!(active_len >= sending.len());
+            let sent = store.send(sending).await;
+
+            let Err(e) = sent else {
+                // Sent successfully, check if more frags are present
+                if active_len == sending.len() {
+                    break;
                 }
+
+                active = move_frag_headers(sending.len(), active);
+                continue;
+            };
+
+            tracing::warn!("Error sending datagram: {:?}", e);
+            // Check error, and if applicable, frag
+            if let peers::SendError::PacketTooBig { mtu } = e {
+                if mtu >= active_len {
+                    // Retry
+                    // TODO: bound retry iterations?
+                    continue;
+                }
+
+                if can_frag(sending) {
+                    frag = mtu;
+                    continue;
+                }
+
+                let pkt_start = sending.as_ptr() as usize - buf_start as usize;
+                let pkt_len = sending.len();
+                tracing::debug!("Handling Packet Too Big");
+                if let Some(pkt) = populate_packet_too_big(mtu, &mut buf, pkt_start, pkt_len)? {
+                    device.send(pkt).await?;
+                }
+
+                break;
             }
+
+            tracing::error!("Error sending datagram: {:?}", e);
             break;
         }
     }
@@ -224,7 +243,7 @@ async fn handle_target(
     loop {
         let Err(err): anyhow::Result<!> = try {
             // We don't actually use server_name. Use a dummy IPv4 here.
-            let conn = ep.connect(addr, "0.0.0.0")?;
+            let conn = ep.connect(addr, "0.0.0.0").map_err(Into::into)?;
             handle_connection(conn, device.clone(), store.clone()).await?
         };
         tracing::error!("Outgoing connection to {} closed: {}", addr, err);
@@ -256,16 +275,16 @@ async fn handle_connection(
     tracing::info!("New connection from {}, max dgram size {:?}", addr, mds);
     store.register(conn.clone()).await;
 
-    let ret = try {
+    let ret: anyhow::Result<!> = try {
         loop {
-            let dgram = conn.read_datagram().await?;
+            let dgram = conn.read_datagram().await.map_err(Into::into)?;
             tracing::debug!("[RECV] {}", dgram.len());
             if dgram.len() == 0 {
                 tracing::warn!("Empty datagram received");
                 continue;
             }
             // Simply forward to tap
-            let written = device.send(dgram.as_ref()).await?;
+            let written = device.send(dgram.as_ref()).await.map_err(Into::into)?;
             if written != dgram.len() {
                 tracing::warn!(
                     "Partial write to tap device, {} instead of {}",
