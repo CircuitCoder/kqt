@@ -2,9 +2,9 @@ name: Rust Build
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   pull_request:
-    branches: [ main, master ]
+    branches: [main, master]
   workflow_dispatch:
 
 jobs:
@@ -21,52 +21,52 @@ jobs:
           - os: windows-latest
             artifact-name: kqt-windows
             binary-ext: '.exe'
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Install Rust nightly
-      uses: dtolnay/rust-toolchain@nightly
-    
-    - name: Cache cargo registry
-      uses: actions/cache@v4
-      with:
-        path: ~/.cargo/registry
-        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-registry-
-    
-    - name: Cache cargo index
-      uses: actions/cache@v4
-      with:
-        path: ~/.cargo/git
-        key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-git-
-    
-    - name: Cache cargo build
-      uses: actions/cache@v4
-      with:
-        path: rust/target
-        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-build-target-
-    
-    - name: Build release binaries
-      working-directory: ./rust
-      run: cargo build --release --verbose
-    
-    - name: Prepare binaries for upload
-      shell: bash
-      run: |
-        mkdir -p binaries
-        cp rust/target/release/kqt-tap${{ matrix.binary-ext }} binaries/
-        cp rust/target/release/kqt-keygen${{ matrix.binary-ext }} binaries/
-    
-    - name: Upload binaries
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ matrix.artifact-name }}
-        path: binaries/*
-        if-no-files-found: error
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: rust/target
+          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-
+
+      - name: Build release binaries
+        working-directory: ./rust
+        run: cargo build --release --verbose
+
+      - name: Prepare binaries for upload
+        shell: bash
+        run: |
+          mkdir -p binaries
+          cp rust/target/release/kqt-tap${{ matrix.binary-ext }} binaries/
+          cp rust/target/release/kqt-keygen${{ matrix.binary-ext }} binaries/
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: binaries/*
+          if-no-files-found: error
