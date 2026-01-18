@@ -9,38 +9,55 @@ on:
 
 jobs:
   build:
-    name: Build on ${{ matrix.os }}
+    name: Build on ${{ matrix.os }} (Rust ${{ matrix.toolchain }})
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
+        toolchain: [nightly-2026-01-18, nightly]
         include:
           - os: ubuntu-latest
+            toolchain: nightly-2026-01-18
             artifact-name: kqt-linux
             binary-ext: ''
+            upload-artifact: true
           - os: windows-latest
+            toolchain: nightly-2026-01-18
             artifact-name: kqt-windows
             binary-ext: '.exe'
+            upload-artifact: true
+          - os: ubuntu-latest
+            toolchain: nightly
+            binary-ext: ''
+            upload-artifact: false
+          - os: windows-latest
+            toolchain: nightly
+            binary-ext: '.exe'
+            upload-artifact: false
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Rust nightly
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Install Rust ${{ matrix.toolchain }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
+          key: ${{ matrix.toolchain }}
 
       - name: Build release binaries
         working-directory: ./rust
         run: cargo build --release --verbose
 
       - name: Prepare binaries for upload
+        if: matrix.upload-artifact == true
         shell: bash
         run: |
           mkdir -p binaries
@@ -48,6 +65,7 @@ jobs:
           cp rust/target/release/kqt-keygen${{ matrix.binary-ext }} binaries/
 
       - name: Upload binaries
+        if: matrix.upload-artifact == true
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact-name }}
