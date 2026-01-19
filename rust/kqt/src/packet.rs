@@ -25,14 +25,14 @@ fn populate_ipv4_packet_too_big(
     pkt_start: usize,
     pkt_len: usize,
 ) -> anyhow::Result<Option<&[u8]>> {
-    use pnet::packet::Packet;
-    use pnet::packet::icmp::IcmpTypes;
-    use pnet::packet::icmp::destination_unreachable::{
+    use pnet_packet::Packet;
+    use pnet_packet::icmp::IcmpTypes;
+    use pnet_packet::icmp::destination_unreachable::{
         IcmpCodes, MutableDestinationUnreachablePacket,
     };
-    use pnet::packet::ip::IpNextHeaderProtocols;
-    use pnet::packet::ipv4::MutableIpv4Packet;
-    use pnet::packet::ipv4::{Ipv4Flags, Ipv4Packet};
+    use pnet_packet::ip::IpNextHeaderProtocols;
+    use pnet_packet::ipv4::MutableIpv4Packet;
+    use pnet_packet::ipv4::{Ipv4Flags, Ipv4Packet};
 
     let Some(ipv4_orig) = Ipv4Packet::new(&buf[pkt_start + ETH_HDR_LEN..]) else {
         return Ok(None);
@@ -71,7 +71,7 @@ fn populate_ipv4_packet_too_big(
     icmpv4.set_next_hop_mtu((outer_mtu - ETH_HDR_LEN) as u16);
 
     // Compute ICMP checksum
-    let icmpv4_chksum = pnet::packet::util::checksum(&icmpv4.packet()[..ipv4_payload_len], 1);
+    let icmpv4_chksum = pnet_packet::util::checksum(&icmpv4.packet()[..ipv4_payload_len], 1);
     icmpv4.set_checksum(icmpv4_chksum);
 
     // Prepare IPv4 header
@@ -90,7 +90,7 @@ fn populate_ipv4_packet_too_big(
     ipv4.set_next_level_protocol(IpNextHeaderProtocols::Icmp);
     ipv4.set_total_length(ipv4_total_len as u16);
 
-    let ipv4_chksum = pnet::packet::ipv4::checksum(&ipv4.to_immutable());
+    let ipv4_chksum = pnet_packet::ipv4::checksum(&ipv4.to_immutable());
     ipv4.set_checksum(ipv4_chksum);
 
     Ok(Some(
@@ -104,9 +104,9 @@ fn populate_ipv6_packet_too_big(
     pkt_start: usize,
     pkt_len: usize,
 ) -> anyhow::Result<Option<&[u8]>> {
-    use pnet::packet::Packet;
-    use pnet::packet::icmpv6::{Icmpv6Code, Icmpv6Types, MutableIcmpv6Packet};
-    use pnet::packet::ipv6::{Ipv6Packet, MutableIpv6Packet};
+    use pnet_packet::Packet;
+    use pnet_packet::icmpv6::{Icmpv6Code, Icmpv6Types, MutableIcmpv6Packet};
+    use pnet_packet::ipv6::{Ipv6Packet, MutableIpv6Packet};
 
     // Assert that we have enough space for the header
     assert!(pkt_start >= IPV6_HDR_LEN + ICMPV6_PACKET_TOO_BIG_WITH_MTU_LEN);
@@ -140,13 +140,13 @@ fn populate_ipv6_packet_too_big(
     icmpv6.set_icmpv6_code(Icmpv6Code(0));
 
     // Compute ICMPv6 checksum
-    let checksum = pnet::packet::util::ipv6_checksum(
+    let checksum = pnet_packet::util::ipv6_checksum(
         &icmpv6.packet()[..icmpv6_payload_len],
         1,
         &[],
         &ipv6_src,
         &ipv6_dst,
-        pnet::packet::ip::IpNextHeaderProtocols::Icmpv6,
+        pnet_packet::ip::IpNextHeaderProtocols::Icmpv6,
     );
     icmpv6.set_checksum(checksum);
 
@@ -160,7 +160,7 @@ fn populate_ipv6_packet_too_big(
     ipv6.set_traffic_class(0);
     ipv6.set_flow_label(0);
     ipv6.set_hop_limit(64);
-    ipv6.set_next_header(pnet::packet::ip::IpNextHeaderProtocols::Icmpv6);
+    ipv6.set_next_header(pnet_packet::ip::IpNextHeaderProtocols::Icmpv6);
     ipv6.set_payload_length(ipv6_payload_len as u16);
 
     Ok(Some(
@@ -197,12 +197,12 @@ pub fn can_frag(packet: &[u8]) -> bool {
         return false;
     }
 
-    use pnet::packet::ipv4::Ipv4Packet;
+    use pnet_packet::ipv4::Ipv4Packet;
     let Some(ipv4) = Ipv4Packet::new(&packet[ETH_HDR_LEN..]) else {
         return false;
     };
 
-    return (ipv4.get_flags() & pnet::packet::ipv4::Ipv4Flags::DontFragment) == 0;
+    return (ipv4.get_flags() & pnet_packet::ipv4::Ipv4Flags::DontFragment) == 0;
 }
 
 pub fn frag_if_needed(
@@ -225,19 +225,19 @@ pub fn frag_if_needed(
         return Ok(packet);
     }
 
-    use pnet::packet::ipv4::MutableIpv4Packet;
+    use pnet_packet::ipv4::MutableIpv4Packet;
     let mut ipv4 = MutableIpv4Packet::new(&mut packet[ETH_HDR_LEN..])
         .ok_or_else(|| anyhow::anyhow!("Invalid IPv4 packet"))?;
     let flags = if needs_frag || orig_frag {
         // Set More Fragments flag if we are fragmenting or if the original packet was fragmented
-        ipv4.get_flags() | pnet::packet::ipv4::Ipv4Flags::MoreFragments
+        ipv4.get_flags() | pnet_packet::ipv4::Ipv4Flags::MoreFragments
     } else {
-        ipv4.get_flags() & !pnet::packet::ipv4::Ipv4Flags::MoreFragments
+        ipv4.get_flags() & !pnet_packet::ipv4::Ipv4Flags::MoreFragments
     };
     ipv4.set_flags(flags);
     ipv4.set_total_length((final_len - ETH_HDR_LEN) as u16);
     // Reconculate checksum
-    let chksum = pnet::packet::ipv4::checksum(&ipv4.to_immutable());
+    let chksum = pnet_packet::ipv4::checksum(&ipv4.to_immutable());
     ipv4.set_checksum(chksum);
     Ok(&packet[..final_len])
 }
@@ -247,12 +247,12 @@ pub fn has_more_frag(packet: &[u8]) -> bool {
         return false;
     }
 
-    use pnet::packet::ipv4::Ipv4Packet;
+    use pnet_packet::ipv4::Ipv4Packet;
     let Some(ipv4) = Ipv4Packet::new(&packet[ETH_HDR_LEN..]) else {
         return false;
     };
 
-    (ipv4.get_flags() & pnet::packet::ipv4::Ipv4Flags::MoreFragments) != 0
+    (ipv4.get_flags() & pnet_packet::ipv4::Ipv4Flags::MoreFragments) != 0
 }
 
 pub fn move_frag_headers(sent: usize, packet: &mut [u8]) -> &mut [u8] {
@@ -262,7 +262,7 @@ pub fn move_frag_headers(sent: usize, packet: &mut [u8]) -> &mut [u8] {
     packet.copy_within(..ETH_HDR_LEN + IPV4_HDR_LEN, dist);
     let new_pkt = &mut packet[dist..];
     // Bump fragment offset
-    use pnet::packet::ipv4::MutableIpv4Packet;
+    use pnet_packet::ipv4::MutableIpv4Packet;
     let mut ipv4 =
         MutableIpv4Packet::new(&mut new_pkt[ETH_HDR_LEN..]).expect("Invalid IPv4 packet");
     let old_offset = ipv4.get_fragment_offset();
@@ -272,10 +272,10 @@ pub fn move_frag_headers(sent: usize, packet: &mut [u8]) -> &mut [u8] {
     new_pkt
 }
 
-use pnet::packet::ip::IpNextHeaderProtocols;
-use pnet::packet::ipv4::Ipv4Packet;
-use pnet::packet::ipv6::Ipv6Packet;
-use pnet::packet::tcp::{TcpOptionNumbers, TcpPacket};
+use pnet_packet::ip::IpNextHeaderProtocols;
+use pnet_packet::ipv4::Ipv4Packet;
+use pnet_packet::ipv6::Ipv6Packet;
+use pnet_packet::tcp::{TcpOptionNumbers, TcpPacket};
 
 /// Clamps the TCP MSS option in an Ethernet frame to the specified value.
 /// Updates the TCP checksum incrementally if modification is performed.
