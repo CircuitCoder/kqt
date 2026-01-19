@@ -41,6 +41,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Get commit SHA
+        id: git-info
+        shell: bash
+        run: |
+          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
       - name: Install Rust ${{ matrix.toolchain }}
         uses: dtolnay/rust-toolchain@master
         with:
@@ -68,6 +74,6 @@ jobs:
         if: matrix.upload-artifact == true
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact-name }}
+          name: ${{ matrix.artifact-name }}-${{ steps.git-info.outputs.sha_short }}
           path: binaries/*
           if-no-files-found: error
