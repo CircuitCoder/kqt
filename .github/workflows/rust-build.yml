@@ -70,9 +70,13 @@ jobs:
         run: |
           set -e
           mkdir -p binaries
-          # Find all binary targets in the workspace and copy them
+          # Find all binary targets in workspace members only
           echo "Finding binary targets in workspace..."
-          binaries=$(cd rust && cargo metadata --no-deps --format-version 1 | jq -r '.packages[].targets[] | select(.kind[] == "bin") | .name')
+          
+          cd rust
+          workspace_members=$(cargo metadata --no-deps --format-version 1 | jq '.workspace_members')
+          binaries=$(cargo metadata --no-deps --format-version 1 | jq -r --argjson wm "$workspace_members" '.packages[] | select([.id] | inside($wm)) | .targets[] | select(.kind[] == "bin") | .name')
+          cd ..
           
           if [ -z "$binaries" ]; then
             echo "Error: No binary targets found in workspace"
@@ -80,7 +84,8 @@ jobs:
           fi
           
           copied_count=0
-          for binary in $binaries; do
+          while IFS= read -r binary; do
+            [ -z "$binary" ] && continue
             binary_path="rust/target/release/${binary}${{ matrix.binary-ext }}"
             if [ -f "$binary_path" ]; then
               echo "Copying binary: $binary"
@@ -89,7 +94,7 @@ jobs:
             else
               echo "Warning: Binary not found at $binary_path"
             fi
-          done
+          done <<< "$binaries"
           
           if [ $copied_count -eq 0 ]; then
             echo "Error: No binaries were copied"
