@@ -157,6 +157,19 @@ impl Server {
 
         tracing::debug!("Device created");
 
+        // Handle routes
+        if cfg.routes.len() > 0 {
+            let ifindex = device.if_index()?;
+            let handle = net_route::Handle::new()?;
+            for route in cfg.routes {
+                let r = net_route::Route::new(route.to.address(), route.to.network_length())
+                    .with_gateway(route.via)
+                    .with_ifindex(ifindex);
+                handle.add(&r).await?;
+                tracing::info!("Added route: {} via {}", route.to, route.via);
+            }
+        }
+
         // Main loop
         // Handle client
         for conn_cfg in cfg.connect_to {

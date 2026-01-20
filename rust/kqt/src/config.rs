@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 
 use serde::Deserialize;
 
@@ -20,13 +20,24 @@ pub struct Config {
 
     /// Enable server mode
     pub listen: Option<SocketAddr>,
+
     /// Connect to remote endpoint
     #[serde(default)]
     pub connect_to: Vec<ConnectTo>,
+
+    /// Automatically add routes
+    #[serde(default)]
+    pub routes: Vec<Route>,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct ConnectTo {
     pub endpoint: SocketAddr,
     pub san: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Route {
+    pub to: cidr::IpInet,
+    pub via: IpAddr,
 }
