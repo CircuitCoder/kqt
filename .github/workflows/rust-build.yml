@@ -60,6 +60,8 @@ jobs:
 
       - name: Build release binaries
         working-directory: ./rust
+        env:
+          RUSTFLAGS: "-D warnings"
         run: cargo build --release --verbose
 
       - name: Prepare binaries for upload
