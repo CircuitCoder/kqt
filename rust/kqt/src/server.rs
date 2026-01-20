@@ -1,5 +1,5 @@
 use clap::Args;
-use libkqt::{config::Config, tunnel::IfaceSetup};
+use kqt_lib::{config::Config, tunnel::IfaceSetup};
 use std::path::PathBuf;
 
 #[derive(Args)]
@@ -24,6 +24,6 @@ impl Server {
         }
 
         let iface = IfaceSetup::Create(self.name);
-        libkqt::tunnel::run(iface, cfg).await
+        kqt_lib::tunnel::run(iface, cfg).await
     }
 }

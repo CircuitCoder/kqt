@@ -807,7 +807,35 @@ dependencies = [
 ]
 
 [[package]]
-name = "kqt-rust"
+name = "kqt"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "cidr",
+ "clap",
+ "const-oid",
+ "ed25519-dalek",
+ "hex",
+ "kqt-lib",
+ "net-route",
+ "pnet_packet",
+ "quinn",
+ "quinn-proto",
+ "rand_core 0.6.4",
+ "ring",
+ "serde",
+ "thiserror 2.0.17",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "tun-rs",
+ "x509-cert",
+]
+
+[[package]]
+name = "kqt-lib"
 version = "0.1.0"
 dependencies = [
  "anyhow",

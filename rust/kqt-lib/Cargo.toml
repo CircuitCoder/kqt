@@ -1,5 +1,5 @@
 [package]
-name = "kqt"
+name = "kqt-lib"
 description = "Rust userspace implementation for kqt"
 version = "0.1.0"
 edition = "2024"
@@ -26,4 +26,3 @@ cidr = { version = "0.3.1", features = ["serde"] }
 ring = "*"
 pnet_packet = "0.35.0"
 net-route = "0.4.6"
-kqt-lib = { path = "../kqt-lib" }
