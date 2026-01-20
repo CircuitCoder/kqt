@@ -62,49 +62,14 @@ jobs:
         working-directory: ./rust
         env:
           RUSTFLAGS: "-D warnings"
-        run: cargo build --workspace --release --verbose --bins
+        run: cargo build --release --verbose
 
       - name: Prepare binaries for upload
         if: matrix.upload-artifact == true
         shell: bash
         run: |
-          set -e
           mkdir -p binaries
-          # Find all binary targets in workspace members only
-          echo "Finding binary targets in workspace..."
-          
-          cd rust
-          metadata=$(cargo metadata --no-deps --format-version 1)
-          workspace_members=$(echo "$metadata" | jq '.workspace_members')
-          binaries=$(echo "$metadata" | jq -r --argjson wm "$workspace_members" '.packages[] | select([.id] | inside($wm)) | .targets[] | select(.kind[] == "bin") | .name')
-          cd ..
-          
-          if [ -z "$binaries" ]; then
-            echo "Error: No binary targets found in workspace"
-            exit 1
-          fi
-          
-          copied_count=0
-          while IFS= read -r binary; do
-            if [[ -z "$binary" ]]; then
-              continue
-            fi
-            binary_path="rust/target/release/${binary}${{ matrix.binary-ext }}"
-            if [ -f "$binary_path" ]; then
-              echo "Copying binary: $binary"
-              cp "$binary_path" binaries/
-              copied_count=$((copied_count + 1))
-            else
-              echo "Warning: Binary not found at $binary_path"
-            fi
-          done <<< "$binaries"
-          
-          if [ $copied_count -eq 0 ]; then
-            echo "Error: No binaries were copied"
-            exit 1
-          fi
-          
-          echo "Successfully copied $copied_count binary(ies)"
+          cp rust/target/release/kqt${{ matrix.binary-ext }} binaries/
 
       - name: Upload binaries
         if: matrix.upload-artifact == true
