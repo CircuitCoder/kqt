@@ -1,9 +1,9 @@
 use base64::Engine;
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Args, Subcommand, ValueEnum};
 use x509_cert::der::{EncodePem, pem::LineEnding};
 
-use kqt::crypto;
-use kqt::crypto::ParsedKeypair;
+use libkqt::crypto;
+use libkqt::crypto::ParsedKeypair;
 
 #[derive(ValueEnum, Clone)]
 enum OutputFormat {
@@ -33,72 +33,72 @@ enum Cmds {
     },
 }
 
-#[derive(Parser)]
-#[command(version, about)]
-struct Args {
+#[derive(Args)]
+pub struct Keygen {
     #[command(subcommand)]
     cmd: Cmds,
 }
 
-fn main() -> anyhow::Result<()> {
-    let args = Args::parse();
+impl Keygen {
+    pub fn run(self) -> anyhow::Result<()> {
+        match self.cmd {
+            Cmds::Public { format, suffix } => {
+                let kp_str = std::io::read_to_string(std::io::stdin())?;
+                let kp = ParsedKeypair::try_from(kp_str.trim())?;
 
-    match args.cmd {
-        Cmds::Public { format, suffix } => {
-            let kp_str = std::io::read_to_string(std::io::stdin())?;
-            let kp = ParsedKeypair::try_from(kp_str.trim())?;
-
-            match format {
-                OutputFormat::Pem => {
-                    let cert = kp.try_to_cert(&suffix)?;
-                    println!("{}", cert.to_pem(LineEnding::LF)?);
+                match format {
+                    OutputFormat::Pem => {
+                        let cert = kp.try_to_cert(&suffix)?;
+                        println!("{}", cert.to_pem(LineEnding::LF)?);
+                    }
+                    OutputFormat::String => {
+                        let pk = ed25519_dalek::VerifyingKey::from(&kp.sk);
+                        let buf = ed25519_dalek::PUBLIC_KEY_LENGTH / 2 * 3 + 1;
+                        let mut encoded = String::with_capacity(buf);
+                        base64::engine::general_purpose::STANDARD
+                            .encode_string(pk.to_bytes(), &mut encoded);
+                        println!("p.{}", encoded);
+                    }
                 }
-                OutputFormat::String => {
-                    let pk = ed25519_dalek::VerifyingKey::from(&kp.sk);
-                    let buf = ed25519_dalek::PUBLIC_KEY_LENGTH / 2 * 3 + 1;
-                    let mut encoded = String::with_capacity(buf);
+            }
+            Cmds::Private { issuer, suffix } => {
+                // Generate key
+                let sk = ed25519_dalek::SigningKey::generate(&mut rand_core::OsRng);
+                let pk: ed25519_dalek::VerifyingKey = sk.verifying_key();
+
+                let issuer_sk = if let Some(i) = issuer {
+                    ParsedKeypair::try_from(i.as_str())?.sk
+                } else {
+                    sk.clone()
+                };
+                let issuer_pk = issuer_sk.verifying_key();
+
+                // Generate TBS cert
+                let tbs = crypto::recover_tbs_cert(pk, issuer_pk, &suffix)?;
+                let sig = crypto::sign_cert(&tbs, &issuer_sk)?;
+
+                let key_buflen = ed25519_dalek::SECRET_KEY_LENGTH / 2 * 3 + 1;
+                let sig_bytes = sig.to_bytes();
+                let sig_buflen = sig_bytes.len() / 2 * 3 + 1;
+
+                let mut sk_encoded = String::with_capacity(key_buflen);
+                base64::engine::general_purpose::STANDARD
+                    .encode_string(sk.to_bytes(), &mut sk_encoded);
+                if issuer_sk == sk {
+                    // Self-signed
+                    println!("s.{}", sk_encoded);
+                } else {
+                    let mut issuer_encoded = String::with_capacity(key_buflen);
+                    let mut sig_encoded = String::with_capacity(sig_buflen);
                     base64::engine::general_purpose::STANDARD
-                        .encode_string(pk.to_bytes(), &mut encoded);
-                    println!("p.{}", encoded);
+                        .encode_string(issuer_pk.to_bytes(), &mut issuer_encoded);
+                    base64::engine::general_purpose::STANDARD
+                        .encode_string(sig_bytes, &mut sig_encoded);
+                    println!("s.{}.{}.{}", sk_encoded, issuer_encoded, sig_encoded);
                 }
             }
         }
-        Cmds::Private { issuer, suffix } => {
-            // Generate key
-            let sk = ed25519_dalek::SigningKey::generate(&mut rand_core::OsRng);
-            let pk: ed25519_dalek::VerifyingKey = sk.verifying_key();
 
-            let issuer_sk = if let Some(i) = issuer {
-                ParsedKeypair::try_from(i.as_str())?.sk
-            } else {
-                sk.clone()
-            };
-            let issuer_pk = issuer_sk.verifying_key();
-
-            // Generate TBS cert
-            let tbs = crypto::recover_tbs_cert(pk, issuer_pk, &suffix)?;
-            let sig = crypto::sign_cert(&tbs, &issuer_sk)?;
-
-            let key_buflen = ed25519_dalek::SECRET_KEY_LENGTH / 2 * 3 + 1;
-            let sig_bytes = sig.to_bytes();
-            let sig_buflen = sig_bytes.len() / 2 * 3 + 1;
-
-            let mut sk_encoded = String::with_capacity(key_buflen);
-            base64::engine::general_purpose::STANDARD.encode_string(sk.to_bytes(), &mut sk_encoded);
-            if issuer_sk == sk {
-                // Self-signed
-                println!("s.{}", sk_encoded);
-            } else {
-                let mut issuer_encoded = String::with_capacity(key_buflen);
-                let mut sig_encoded = String::with_capacity(sig_buflen);
-                base64::engine::general_purpose::STANDARD
-                    .encode_string(issuer_pk.to_bytes(), &mut issuer_encoded);
-                base64::engine::general_purpose::STANDARD
-                    .encode_string(sig_bytes, &mut sig_encoded);
-                println!("s.{}.{}.{}", sk_encoded, issuer_encoded, sig_encoded);
-            }
-        }
+        Ok(())
     }
-
-    Ok(())
 }
