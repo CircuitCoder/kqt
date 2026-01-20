@@ -67,8 +67,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p binaries
-          cp rust/target/release/kqt-tap${{ matrix.binary-ext }} binaries/
-          cp rust/target/release/kqt-keygen${{ matrix.binary-ext }} binaries/
+          cp rust/target/release/kqt${{ matrix.binary-ext }} binaries/
 
       - name: Upload binaries
         if: matrix.upload-artifact == true
