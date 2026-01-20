@@ -74,8 +74,9 @@ jobs:
           echo "Finding binary targets in workspace..."
           
           cd rust
-          workspace_members=$(cargo metadata --no-deps --format-version 1 | jq '.workspace_members')
-          binaries=$(cargo metadata --no-deps --format-version 1 | jq -r --argjson wm "$workspace_members" '.packages[] | select([.id] | inside($wm)) | .targets[] | select(.kind[] == "bin") | .name')
+          metadata=$(cargo metadata --no-deps --format-version 1)
+          workspace_members=$(echo "$metadata" | jq '.workspace_members')
+          binaries=$(echo "$metadata" | jq -r --argjson wm "$workspace_members" '.packages[] | select([.id] | inside($wm)) | .targets[] | select(.kind[] == "bin") | .name')
           cd ..
           
           if [ -z "$binaries" ]; then
@@ -85,7 +86,9 @@ jobs:
           
           copied_count=0
           while IFS= read -r binary; do
-            [ -z "$binary" ] && continue
+            if [[ -z "$binary" ]]; then
+              continue
+            fi
             binary_path="rust/target/release/${binary}${{ matrix.binary-ext }}"
             if [ -f "$binary_path" ]; then
               echo "Copying binary: $binary"
