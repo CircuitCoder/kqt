@@ -28,6 +28,9 @@ pub struct Config {
     /// Automatically add routes
     #[serde(default)]
     pub routes: Vec<Route>,
+
+    /// Advanced settings
+    pub advanced: Advanced,
 }
 
 #[derive(Deserialize, Debug)]
@@ -41,4 +44,29 @@ pub struct Route {
     pub to: cidr::IpInet,
     pub via: IpAddr,
     pub metric: Option<u32>,
+}
+
+const fn default_u16<const V: u16>() -> u16 {
+    V
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Advanced {
+    /// Initial outer connection MTU
+    #[serde(default = "default_u16::<1452>")]
+    pub initial_outer_mtu: u16,
+
+    /// Keepalive interval in seconds
+    #[serde(default = "default_u16::<25>")]
+    pub keepalive: u16,
+
+    /// Idle timeout in seconds
+    #[serde(default = "default_u16::<60>")]
+    pub max_idle_timeout: u16,
+
+    /// Override send buffer size
+    pub send_buffer: Option<usize>,
+
+    /// Overrride recv buffer size
+    pub recv_buffer: Option<usize>,
 }

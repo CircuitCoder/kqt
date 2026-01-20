@@ -1,4 +1,4 @@
-#![feature(never_type, try_blocks, try_trait_v2, substr_range)]
+#![feature(never_type)]
 
 mod keygen;
 mod server;
