@@ -14,8 +14,9 @@ enum OutputFormat {
 #[derive(Subcommand)]
 enum Cmds {
     Private {
-        /// Private key of the issuer
-        issuer: Option<String>,
+        /// Self-signed mode
+        #[arg(short = 'c', long)]
+        self_signed: bool,
 
         /// Suffix of the CN
         #[arg(short, long)]
@@ -61,15 +62,20 @@ impl Keygen {
                     }
                 }
             }
-            Cmds::Private { issuer, suffix } => {
+            Cmds::Private {
+                self_signed,
+                suffix,
+            } => {
                 // Generate key
                 let sk = ed25519_dalek::SigningKey::generate(&mut rand_core::OsRng);
                 let pk: ed25519_dalek::VerifyingKey = sk.verifying_key();
 
-                let issuer_sk = if let Some(i) = issuer {
-                    ParsedKeypair::try_from(i.as_str())?.sk
-                } else {
+                let issuer_sk = if self_signed {
                     sk.clone()
+                } else {
+                    // Read from STDIN
+                    let issuer_str = std::io::read_to_string(std::io::stdin())?;
+                    ParsedKeypair::try_from(issuer_str.as_str())?.sk
                 };
                 let issuer_pk = issuer_sk.verifying_key();
 
