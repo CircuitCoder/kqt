@@ -62,14 +62,19 @@ jobs:
         working-directory: ./rust
         env:
           RUSTFLAGS: "-D warnings"
-        run: cargo build --release --verbose
+        run: cargo build --workspace --release --verbose --bins
 
       - name: Prepare binaries for upload
         if: matrix.upload-artifact == true
         shell: bash
         run: |
           mkdir -p binaries
-          cp rust/target/release/kqt${{ matrix.binary-ext }} binaries/
+          # Find all binary targets in the workspace and copy them
+          for binary in $(cd rust && cargo metadata --no-deps --format-version 1 | jq -r '.packages[].targets[] | select(.kind[] == "bin") | .name'); do
+            if [ -f "rust/target/release/${binary}${{ matrix.binary-ext }}" ]; then
+              cp "rust/target/release/${binary}${{ matrix.binary-ext }}" binaries/
+            fi
+          done
 
       - name: Upload binaries
         if: matrix.upload-artifact == true
