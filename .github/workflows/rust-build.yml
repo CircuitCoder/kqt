@@ -68,13 +68,35 @@ jobs:
         if: matrix.upload-artifact == true
         shell: bash
         run: |
+          set -e
           mkdir -p binaries
           # Find all binary targets in the workspace and copy them
-          for binary in $(cd rust && cargo metadata --no-deps --format-version 1 | jq -r '.packages[].targets[] | select(.kind[] == "bin") | .name'); do
-            if [ -f "rust/target/release/${binary}${{ matrix.binary-ext }}" ]; then
-              cp "rust/target/release/${binary}${{ matrix.binary-ext }}" binaries/
+          echo "Finding binary targets in workspace..."
+          binaries=$(cd rust && cargo metadata --no-deps --format-version 1 | jq -r '.packages[].targets[] | select(.kind[] == "bin") | .name')
+          
+          if [ -z "$binaries" ]; then
+            echo "Error: No binary targets found in workspace"
+            exit 1
+          fi
+          
+          copied_count=0
+          for binary in $binaries; do
+            binary_path="rust/target/release/${binary}${{ matrix.binary-ext }}"
+            if [ -f "$binary_path" ]; then
+              echo "Copying binary: $binary"
+              cp "$binary_path" binaries/
+              copied_count=$((copied_count + 1))
+            else
+              echo "Warning: Binary not found at $binary_path"
             fi
           done
+          
+          if [ $copied_count -eq 0 ]; then
+            echo "Error: No binaries were copied"
+            exit 1
+          fi
+          
+          echo "Successfully copied $copied_count binary(ies)"
 
       - name: Upload binaries
         if: matrix.upload-artifact == true
