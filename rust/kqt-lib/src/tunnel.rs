@@ -4,8 +4,8 @@ use quinn::{
     crypto::rustls::{QuicClientConfig, QuicServerConfig},
     rustls::{self, version::TLS13},
 };
-use std::{borrow::Cow, net::SocketAddr, os::fd::RawFd, sync::Arc, time::Duration};
-use tun_rs::{AsyncDevice, DeviceBuilder};
+use std::{borrow::Cow, net::SocketAddr, sync::Arc, time::Duration};
+use tun_rs::DeviceBuilder;
 
 use crate::{
     crypto::{LiteCertVerifier, ParsedKeypair, ParsedTrustAnchor},
@@ -21,7 +21,8 @@ const KQT_PROTO_VERSION: &'static [u8] = b"kqt/0.1";
 
 pub enum IfaceSetup {
     Create(String),
-    Fd(RawFd),
+    #[cfg(any(unix))]
+    Fd(std::os::fd::RawFd),
 }
 
 pub async fn run(iface: IfaceSetup, cfg: crate::config::Config) -> anyhow::Result<!> {
@@ -103,7 +104,8 @@ pub async fn run(iface: IfaceSetup, cfg: crate::config::Config) -> anyhow::Resul
             .name(name)
             .layer(tun_rs::Layer::L2)
             .build_async()?,
-        IfaceSetup::Fd(fd) => unsafe { AsyncDevice::from_fd(fd)? },
+        #[cfg(any(unix))]
+        IfaceSetup::Fd(fd) => unsafe { tun_rs::AsyncDevice::from_fd(fd)? },
     };
 
     let device = Arc::new(device);
