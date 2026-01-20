@@ -51,4 +51,4 @@ jobs:
 
       - name: Check for unused dependencies
         working-directory: ./rust
-        run: cargo udeps --all-targets
+        run: cargo udeps --workspace --all-targets
