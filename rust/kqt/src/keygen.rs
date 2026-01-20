@@ -2,8 +2,8 @@ use base64::Engine;
 use clap::{Args, Subcommand, ValueEnum};
 use x509_cert::der::{EncodePem, pem::LineEnding};
 
-use libkqt::crypto;
-use libkqt::crypto::ParsedKeypair;
+use kqt_lib::crypto;
+use kqt_lib::crypto::ParsedKeypair;
 
 #[derive(ValueEnum, Clone)]
 enum OutputFormat {
