@@ -162,9 +162,21 @@ impl Server {
             let ifindex = device.if_index()?;
             let handle = net_route::Handle::new()?;
             for route in cfg.routes {
-                let r = net_route::Route::new(route.to.address(), route.to.network_length())
+                let mut r = net_route::Route::new(route.to.address(), route.to.network_length())
                     .with_gateway(route.via)
                     .with_ifindex(ifindex);
+
+                if let Some(metric) = route.metric {
+                    #[cfg(any(target_os = "windows", target_os = "linux"))]
+                    {
+                        r = r.with_metric(metric);
+                    }
+                    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+                    {
+                        tracing::warn!("Route metric is not supported on this OS, ignoring.");
+                    }
+                }
+
                 handle.add(&r).await?;
                 tracing::info!("Added route: {} via {}", route.to, route.via);
             }

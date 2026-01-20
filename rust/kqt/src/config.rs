@@ -40,4 +40,5 @@ pub struct ConnectTo {
 pub struct Route {
     pub to: cidr::IpInet,
     pub via: IpAddr,
+    pub metric: Option<u32>,
 }
