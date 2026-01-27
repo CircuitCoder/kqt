@@ -11,6 +11,10 @@ pub struct Config {
     /// Suffix used in certificate verification
     pub suffix: String,
 
+    /// Operating mode
+    #[serde(default)]
+    pub mode: Mode,
+
     /// System MTU
     pub mtu: Option<u16>,
 
@@ -30,13 +34,28 @@ pub struct Config {
     pub routes: Vec<Route>,
 
     /// Advanced settings
+    #[serde(default)]
     pub advanced: Advanced,
+}
+
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    L2,
+    L3,
+}
+
+impl Default for Mode {
+    fn default() -> Self {
+        Mode::L2
+    }
 }
 
 #[derive(Deserialize, Debug)]
 pub struct ConnectTo {
     pub endpoint: SocketAddr,
     pub san: Option<String>,
+    #[serde(default)]
+    pub designated_ip: Vec<IpAddr>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -46,22 +65,15 @@ pub struct Route {
     pub metric: Option<u32>,
 }
 
-const fn default_u16<const V: u16>() -> u16 {
-    V
-}
-
 #[derive(Deserialize, Debug)]
 pub struct Advanced {
     /// Initial outer connection MTU
-    #[serde(default = "default_u16::<1452>")]
     pub initial_outer_mtu: u16,
 
     /// Keepalive interval in seconds
-    #[serde(default = "default_u16::<25>")]
     pub keepalive: u16,
 
     /// Idle timeout in seconds
-    #[serde(default = "default_u16::<60>")]
     pub max_idle_timeout: u16,
 
     /// Override send buffer size
@@ -69,4 +81,16 @@ pub struct Advanced {
 
     /// Overrride recv buffer size
     pub recv_buffer: Option<usize>,
+}
+
+impl Default for Advanced {
+    fn default() -> Self {
+        Advanced {
+            initial_outer_mtu: 1452,
+            keepalive: 25,
+            max_idle_timeout: 60,
+            send_buffer: None,
+            recv_buffer: None,
+        }
+    }
 }

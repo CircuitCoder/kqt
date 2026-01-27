@@ -1,12 +1,18 @@
+use cidr::{IpInet, Ipv4Inet, Ipv6Inet};
 use ed25519_dalek::VerifyingKey;
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    hash::Hash,
+    net::IpAddr,
+    sync::Arc,
+};
 use thiserror::Error;
 use tokio::sync::RwLock;
 
 use quinn::{Connection, SendDatagramError, VarInt};
 use x509_cert::der::Decode;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MACAddr(pub [u8; 6]);
 
 #[derive(Error, Debug)]
@@ -17,6 +23,8 @@ pub enum SendError {
     DgramDisabled,
     #[error("no live connection")]
     NoLiveConnection,
+    #[error("destination unreachable")]
+    Unreachable,
     #[error("unknown error")]
     Unknown(#[from] SendDatagramError),
 }
@@ -36,13 +44,13 @@ fn get_remote_identity(conn: &Connection) -> VerifyingKey {
         .expect("Invalid public key in certificate")
 }
 
-struct Remote {
+struct Neighboor {
     identity: VerifyingKey,
     outgoing: Option<Connection>,
     incoming: Option<Connection>,
 }
 
-impl Remote {
+impl Neighboor {
     pub fn send(&self, data: &[u8]) -> Result<(), SendError> {
         // Prefers incoming connection to mimics HTTP/3 traffic
         let conn = self
@@ -103,7 +111,7 @@ impl Remote {
     }
 }
 
-impl std::fmt::Display for Remote {
+impl std::fmt::Display for Neighboor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{} ", hex::encode(&self.identity.as_bytes()[..4]))?;
 
@@ -122,107 +130,189 @@ impl std::fmt::Display for Remote {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Mappable {
+    MAC(MACAddr),
+    IpInet(IpInet),
+    // FIXME: add node id
+}
+
+enum Router {
+    DirectOnly,
+}
+
 struct PeersInner {
-    // TODO: remote pubkey -> connection mapping
-    remotes: Vec<Remote>,
-    linked: HashMap<MACAddr, usize>,
+    neighboors: Vec<Neighboor>,
+    // TODO: seqno
+    mappings: BTreeMap<Mappable, VerifyingKey>,
+    router: Router,
 }
 
 #[derive(Clone)]
 pub struct Peers(Arc<RwLock<PeersInner>>);
 
+#[derive(Debug)]
+pub enum SendTarget {
+    UnicastMAC(MACAddr),
+    UnicastIP(IpAddr),
+    Broadcast,
+}
+
+const fn const_unwrap<T, E>(r: Result<T, E>) -> T {
+    match r {
+        Ok(v) => v,
+        Err(_e) => panic!("Const unwrap failed"),
+    }
+}
+const MINIMAL_IPV4_INET: Ipv4Inet = const_unwrap(Ipv4Inet::new(std::net::Ipv4Addr::from([0; 4]), 0));
+const MINIMAL_IPV6_INET: Ipv6Inet = const_unwrap(Ipv6Inet::new(std::net::Ipv6Addr::from([0; 16]), 0));
+
+enum LookupResult<'k> {
+    Broadcast,
+    Unicast(&'k VerifyingKey),
+    Unreachable,
+}
+
+impl<'k> From<Option<&'k VerifyingKey>> for LookupResult<'k> {
+    fn from(v: Option<&'k VerifyingKey>) -> Self {
+        match v {
+            Some(k) => LookupResult::Unicast(k),
+            None => LookupResult::Unreachable,
+        }
+    }
+}
+
+impl PeersInner {
+    // Lookup the corresponding end receiving node
+    fn lookup(&self, t: &SendTarget) -> LookupResult<'_> {
+        tracing::debug!("Lookup target: {:?}", t);
+        match t {
+            SendTarget::UnicastMAC(mac) => if let Some(r) = self.mappings.get(&Mappable::MAC(*mac)) {
+                LookupResult::Unicast(r)
+            } else {
+                // Broadcast on MAC
+                LookupResult::Broadcast
+            }
+            SendTarget::UnicastIP(ip) => {
+                let mut lookup = None;
+                match ip {
+                    IpAddr::V4(v4) => {
+                        let mut route = self.mappings.upper_bound(std::ops::Bound::Excluded(
+                            &Mappable::IpInet(MINIMAL_IPV4_INET.into())
+                        ));
+                        while let Some((&Mappable::IpInet(IpInet::V4(r)), t)) = route.next() {
+                            if r.contains(&v4) {
+                                lookup = Some(t);
+                            }
+                        }
+                    }
+                    IpAddr::V6(v6) => {
+                        let mut route = self.mappings.upper_bound(std::ops::Bound::Excluded(
+                            &Mappable::IpInet(MINIMAL_IPV6_INET.into())
+                        ));
+                        while let Some((&Mappable::IpInet(IpInet::V6(r)), t)) = route.next() {
+                            if r.contains(&v6) {
+                                lookup = Some(t);
+                            }
+                        }
+                    }
+                }
+                lookup.into()
+            }
+            SendTarget::Broadcast => LookupResult::Broadcast,
+        }
+    }
+
+    fn route(&self, to: &VerifyingKey) -> Option<&Neighboor> {
+        match &self.router {
+            Router::DirectOnly => self.neighboors.iter().find(|r| &r.identity == to)
+        }
+    }
+}
+
+// FIXME: check if many-to-one is working
 impl Peers {
     pub fn new() -> Self {
         let inner = PeersInner {
-            remotes: Vec::new(),
-            linked: HashMap::new(),
+            neighboors: Vec::new(),
+            mappings: BTreeMap::new(),
+            router: Router::DirectOnly,
         };
         Peers(Arc::new(RwLock::new(inner)))
     }
 
-    pub async fn register(&self, conn: Connection) {
+    pub async fn attach_conn(&self, conn: Connection) {
         let identity = get_remote_identity(&conn);
         let mut inner = self.0.write().await;
-        let remote = if let Some(remote) = inner.remotes.iter_mut().find(|r| r.identity == identity)
-        {
-            remote
-        } else {
-            inner.remotes.push(Remote {
-                identity: identity.clone(),
-                outgoing: None,
-                incoming: None,
-            });
-            inner.remotes.last_mut().unwrap()
-        };
+        let remote =
+            if let Some(remote) = inner.neighboors.iter_mut().find(|r| r.identity == identity) {
+                remote
+            } else {
+                inner.neighboors.push(Neighboor {
+                    identity: identity.clone(),
+                    outgoing: None,
+                    incoming: None,
+                });
+                inner.neighboors.last_mut().unwrap()
+            };
 
         remote.attach(conn);
     }
 
-    pub async fn unregister(&self, conn: &Connection) {
+    pub async fn detach_conn(&self, conn: &Connection) {
         // Don't close it ourself, close it outside
         let identity = get_remote_identity(conn);
         let mut inner = self.0.write().await;
-        let Some((idx, remote)) = inner
-            .remotes
+        let Some(remote) = inner
+            .neighboors
             .iter_mut()
-            .enumerate()
-            .find(|(_, r)| r.identity == identity)
+            .find(|r| r.identity == identity)
         else {
             return;
         };
 
         remote.detach(&conn);
-
-        if !remote.is_live() {
-            inner.linked.retain(|_, &mut v| v != idx);
-        }
     }
 
-    pub async fn link(&self, mac: MACAddr, conn: &Connection) {
+    pub async fn map(&self, r: Mappable, conn: &Connection) {
+        let identity = get_remote_identity(conn);
+
         let inner = self.0.read().await;
         // Avoid costly locking if already linked
-        if inner.linked.contains_key(&mac) {
+        if inner.mappings.get(&r) == Some(&identity) {
             return;
         }
 
-        let identity = get_remote_identity(conn);
-        let (idx, r) = inner
-            .remotes
-            .iter()
-            .enumerate()
-            .find(|(_, r)| r.identity == identity)
-            .expect("Connection not registered");
-
-        tracing::debug!("Linking MAC {} to remote {}", hex::encode(mac.0), r,);
+        tracing::debug!("Linking {:?} to remote {}", r, hex::encode(identity.as_bytes()));
 
         drop(inner);
 
         let mut inner = self.0.write().await;
-        inner.linked.insert(mac, idx);
+        inner.mappings.insert(r, identity);
     }
 
-    pub async fn send(&self, data: &[u8]) -> Result<(), SendError> {
+    pub async fn send(&self, target: &SendTarget, data: &[u8]) -> Result<(), SendError> {
         // Ignore failed connections
         let inner = self.0.read().await;
-        let specific = data
-            .get(0..6)
-            .and_then(|s| inner.linked.get(&MACAddr(s.try_into().unwrap())));
-        if let Some(remote_id) = specific {
-            let remote = inner
-                .remotes
-                .get(*remote_id)
-                .expect("Inconsistent remote ID");
-            tracing::debug!("[SEND {}] {}", remote, data.len());
-            remote.send(data)
-        } else {
-            tracing::debug!("[BROADCAST] {}", data.len());
-            for remote in inner.remotes.iter() {
-                if remote.is_live() {
-                    // FIXME: collect data
-                    let _ = remote.send(data);
-                }
+        let lookup = inner.lookup(target);
+        match lookup {
+            LookupResult::Unicast(v) => {
+                let remote = inner.route(v).ok_or(SendError::Unreachable)?;
+                tracing::debug!("[U {}] {}", remote, data.len());
+                remote.send(data)
             }
-            Ok(())
+            LookupResult::Broadcast => {
+                tracing::debug!("[B] {}", data.len());
+                // Fixme: broadcast to non-adjacent nodes
+                for remote in inner.neighboors.iter() {
+                    if remote.is_live() {
+                        // FIXME: collect error
+                        let _ = remote.send(data);
+                    }
+                }
+                Ok(())
+            }
+            LookupResult::Unreachable => Err(SendError::Unreachable),
         }
     }
 }

@@ -8,21 +8,128 @@ use std::{borrow::Cow, net::SocketAddr, sync::Arc, time::Duration};
 use tun_rs::DeviceBuilder;
 
 use crate::{
+    config::{Config, Mode},
     crypto::{LiteCertVerifier, ParsedKeypair, ParsedTrustAnchor},
-    packet::{clamp_mss, has_more_frag, populate_packet_too_big},
+    packet::{ETH_HDR_LEN, clamp_mss, ip_has_more_frag, ip_is_v4, populate_packet_too_big},
+    peers::Mappable,
     *,
 };
 use crate::{
-    packet::{FRONT_BUFFER, can_frag, frag_if_needed, move_frag_headers},
+    packet::{FRONT_BUFFER, frag_if_needed, ip_can_frag, move_frag_headers},
     peers::Peers,
 };
 
 const KQT_PROTO_VERSION: &'static [u8] = b"kqt/0.1";
 
+impl Mode {
+    fn extra_hdr(&self) -> usize {
+        match self {
+            Mode::L2 => ETH_HDR_LEN,
+            Mode::L3 => 0,
+        }
+    }
+
+    fn includes_eth(&self) -> bool {
+        match self {
+            Mode::L2 => true,
+            Mode::L3 => false,
+        }
+    }
+
+    fn parse_send_target(&self, data: &[u8]) -> Option<peers::SendTarget> {
+        match self {
+            Mode::L2 => {
+                let mac: [u8; 6] = data
+                    .get(0..6)?
+                    .try_into().unwrap();
+                if mac == [0xff; 6] {
+                    Some(peers::SendTarget::Broadcast)
+                } else {
+                    Some(peers::SendTarget::UnicastMAC(peers::MACAddr(mac)))
+                }
+            }
+            Mode::L3 => {
+                // Detect IP version
+                if ip_is_v4(data) {
+                    let addr: [u8; 4] = data.get(16..20)?.try_into().unwrap();
+                    Some(peers::SendTarget::UnicastIP(addr.into()))
+                } else  {
+                    let addr: [u8; 16] = data.get(24..40)?.try_into().unwrap();
+                    Some(peers::SendTarget::UnicastIP(addr.into()))
+                }
+            }
+        }
+    }
+}
+
 pub enum IfaceSetup {
     Create(String),
     #[cfg(any(unix))]
     Fd(std::os::fd::RawFd),
+}
+
+impl Mode {
+    fn to_tun_layer(self) -> tun_rs::Layer {
+        match self {
+            Mode::L2 => tun_rs::Layer::L2,
+            Mode::L3 => tun_rs::Layer::L3,
+        }
+    }
+}
+
+impl Config {
+    fn build_device(&self, iface: IfaceSetup) -> anyhow::Result<Arc<tun_rs::AsyncDevice>> {
+        let device = match iface {
+            IfaceSetup::Create(ref name) => DeviceBuilder::new()
+                .name(name)
+                .layer(self.mode.to_tun_layer())
+                .build_async()?,
+            #[cfg(any(unix))]
+            IfaceSetup::Fd(fd) => unsafe { tun_rs::AsyncDevice::from_fd(fd)? },
+        };
+
+        if let Some(mtu) = self.mtu {
+            device.set_mtu(mtu)?;
+        }
+        for addr in self.address.iter() {
+            match addr {
+                cidr::IpInet::V4(cidr) => {
+                    device.add_address_v4(cidr.address(), cidr.network_length())?
+                }
+                cidr::IpInet::V6(cidr) => {
+                    device.add_address_v6(cidr.address(), cidr.network_length())?
+                }
+            }
+        }
+        Ok(Arc::new(device))
+    }
+
+    async fn apply_routes(&self, device: Arc<tun_rs::AsyncDevice>) -> anyhow::Result<()> {
+        if self.routes.len() > 0 {
+            let ifindex = device.if_index()?;
+            let handle = net_route::Handle::new()?;
+            for route in self.routes.iter() {
+                let mut r = net_route::Route::new(route.to.address(), route.to.network_length())
+                    .with_gateway(route.via)
+                    .with_ifindex(ifindex);
+
+                if let Some(metric) = route.metric {
+                    #[cfg(any(target_os = "windows", target_os = "linux"))]
+                    {
+                        r = r.with_metric(metric);
+                    }
+                    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+                    {
+                        tracing::warn!("Route metric is not supported on this OS, ignoring.");
+                    }
+                }
+
+                handle.add(&r).await?;
+                tracing::info!("Added route: {} via {}", route.to, route.via);
+            }
+        }
+        Ok(())
+    }
 }
 
 pub async fn run(iface: IfaceSetup, cfg: crate::config::Config) -> anyhow::Result<!> {
@@ -99,59 +206,12 @@ pub async fn run(iface: IfaceSetup, cfg: crate::config::Config) -> anyhow::Resul
 
     tracing::debug!("Endpoints created");
 
-    let device = match iface {
-        IfaceSetup::Create(ref name) => DeviceBuilder::new()
-            .name(name)
-            .layer(tun_rs::Layer::L2)
-            .build_async()?,
-        #[cfg(any(unix))]
-        IfaceSetup::Fd(fd) => unsafe { tun_rs::AsyncDevice::from_fd(fd)? },
-    };
+    let device = cfg.build_device(iface)?;
+    tracing::debug!("Device created");
+    cfg.apply_routes(device.clone()).await?;
 
-    let device = Arc::new(device);
-    if let Some(mtu) = cfg.mtu {
-        device.set_mtu(mtu)?;
-    }
-    for addr in cfg.address {
-        match addr {
-            cidr::IpInet::V4(cidr) => {
-                device.add_address_v4(cidr.address(), cidr.network_length())?
-            }
-            cidr::IpInet::V6(cidr) => {
-                device.add_address_v6(cidr.address(), cidr.network_length())?
-            }
-        }
-    }
     let store = Peers::new();
 
-    tracing::debug!("Device created");
-
-    // Handle routes
-    if cfg.routes.len() > 0 {
-        let ifindex = device.if_index()?;
-        let handle = net_route::Handle::new()?;
-        for route in cfg.routes {
-            let mut r = net_route::Route::new(route.to.address(), route.to.network_length())
-                .with_gateway(route.via)
-                .with_ifindex(ifindex);
-
-            if let Some(metric) = route.metric {
-                #[cfg(any(target_os = "windows", target_os = "linux"))]
-                {
-                    r = r.with_metric(metric);
-                }
-                #[cfg(not(any(target_os = "windows", target_os = "linux")))]
-                {
-                    tracing::warn!("Route metric is not supported on this OS, ignoring.");
-                }
-            }
-
-            handle.add(&r).await?;
-            tracing::info!("Added route: {} via {}", route.to, route.via);
-        }
-    }
-
-    // Main loop
     // Handle client
     for conn_cfg in cfg.connect_to {
         tokio::spawn(handle_target(
@@ -159,36 +219,44 @@ pub async fn run(iface: IfaceSetup, cfg: crate::config::Config) -> anyhow::Resul
             device.clone(),
             conn_cfg.endpoint,
             store.clone(),
+            cfg.mode,
         ));
     }
+
     // Handle server
     if cfg.listen.is_some() {
-        tokio::spawn(handle_server(endpoint, device.clone(), store.clone()));
+        tokio::spawn(handle_server(endpoint, device.clone(), store.clone(), cfg.mode));
     }
-    // Handle tap send
-    // TODO: reuse buffer
+
+    // Main loop
     let mut buf = Vec::new();
-    loop {
+    'pkt: loop {
         let mtu = device.mtu()?;
-        buf.resize(mtu as usize + 18 + FRONT_BUFFER, 0);
+        buf.resize(mtu as usize + ETH_HDR_LEN + FRONT_BUFFER, 0);
         let buf_start = buf.as_ptr();
         let len: usize = device.recv(&mut buf[FRONT_BUFFER..]).await?;
 
+        let Some(target) = cfg.mode.parse_send_target(&buf[FRONT_BUFFER..FRONT_BUFFER + len]) else {
+            tracing::debug!("Unable to parse route target, dropping packet");
+            continue 'pkt;
+        };
+
         let mut active = &mut buf[FRONT_BUFFER..FRONT_BUFFER + len];
         let mut frag = None;
-        let orig_frag = has_more_frag(active);
+        let orig_frag = ip_has_more_frag(&active[cfg.mode.extra_hdr()..]);
 
-        loop {
+        #[allow(unused)]
+        'frag: loop {
             let active_len = active.len();
             // Don't frag on first try.
             let sending = if let Some(frag) = frag {
-                frag_if_needed(frag, active, orig_frag)?
+                frag_if_needed(frag, active, orig_frag, cfg.mode.extra_hdr())?
             } else {
                 &active[..]
             };
             let sending_len = sending.len();
             assert!(active_len >= sending_len);
-            let sent = store.send(sending).await;
+            let sent = store.send(&target, sending).await;
 
             let Err(e) = sent else {
                 // Sent successfully, check if more frags are present
@@ -196,7 +264,7 @@ pub async fn run(iface: IfaceSetup, cfg: crate::config::Config) -> anyhow::Resul
                     break;
                 }
 
-                active = move_frag_headers(sending_len, active);
+                active = move_frag_headers(sending_len, active, cfg.mode.extra_hdr());
                 continue;
             };
 
@@ -209,14 +277,20 @@ pub async fn run(iface: IfaceSetup, cfg: crate::config::Config) -> anyhow::Resul
                     continue;
                 }
 
-                if can_frag(sending) {
+                if ip_can_frag(&sending[ETH_HDR_LEN..]) {
                     frag = Some(mtu);
                     continue;
                 }
 
                 let pkt_start = sending.as_ptr() as usize - buf_start as usize;
                 let pkt_len = sending_len;
-                if let Some(pkt) = populate_packet_too_big(mtu, &mut buf, pkt_start, pkt_len)? {
+                if let Some(pkt) = populate_packet_too_big(
+                    mtu,
+                    &mut buf,
+                    pkt_start,
+                    pkt_len,
+                    cfg.mode.includes_eth(),
+                )? {
                     device.send(pkt).await?;
                 }
 
@@ -234,12 +308,13 @@ async fn handle_target(
     device: Arc<tun_rs::AsyncDevice>,
     addr: SocketAddr,
     store: Peers,
+    mode: Mode,
 ) -> ! {
     loop {
         let Err(err): anyhow::Result<!> = try {
             // We don't actually use server_name. Use a dummy IPv4 here.
             let conn = ep.connect(addr, "0.0.0.0").map_err(Into::into)?;
-            handle_connection(conn, device.clone(), store.clone()).await?
+            handle_connection(conn, device.clone(), store.clone(), mode).await?
         };
         tracing::error!("Outgoing connection to {} closed: {}", addr, err);
         match err.downcast::<quinn::ConnectionError>() {
@@ -263,12 +338,13 @@ async fn handle_connection(
     conn: Connecting,
     device: Arc<tun_rs::AsyncDevice>,
     store: Peers,
+    mode: Mode,
 ) -> anyhow::Result<!> {
     let conn = conn.await?;
     let mds = conn.max_datagram_size();
     let addr = conn.remote_address();
     tracing::info!("New connection from {}, max dgram size {:?}", addr, mds);
-    store.register(conn.clone()).await;
+    store.attach_conn(conn.clone()).await;
 
     let ret: anyhow::Result<!> = try {
         loop {
@@ -281,12 +357,12 @@ async fn handle_connection(
 
             // Clamp MSS
             let patched = if let Some(mds) = conn.max_datagram_size() {
-                clamp_mss(dgram.as_ref(), mds)
+                clamp_mss(dgram.as_ref(), mds, mode.extra_hdr())
             } else {
                 Cow::Borrowed(dgram.as_ref())
             };
 
-            // Simply forward to tap
+            // Simply forward to device
             let written = device.send(patched.as_ref()).await.map_err(Into::into)?;
             if written != dgram.len() {
                 tracing::warn!(
@@ -296,15 +372,19 @@ async fn handle_connection(
                 );
             }
 
+            // TODO: unwrap envelope
+
             // Also, parse the source MAC address
-            if let Some(mac) = dgram.get(6..12).and_then(|s| s.try_into().ok()) {
-                let mac_addr = peers::MACAddr(mac);
-                // Register the connection with the MAC address
-                store.link(mac_addr, &conn).await;
+            if mode == Mode::L2 {
+                if let Some(mac) = dgram.get(6..12).and_then(|s| s.try_into().ok()) {
+                    let mac = peers::MACAddr(mac);
+                    // Register the connection with the MAC address
+                    store.map(Mappable::MAC(mac), &conn).await;
+                }
             }
         }
     };
-    store.unregister(&conn).await;
+    store.detach_conn(&conn).await;
     ret
 }
 
@@ -312,6 +392,7 @@ async fn handle_server(
     ep: Endpoint,
     device: Arc<tun_rs::AsyncDevice>,
     store: Peers,
+    mode: Mode,
 ) -> anyhow::Result<()> {
     tracing::info!("Listening on {}", ep.local_addr()?);
     while let Some(incoming) = ep.accept().await {
@@ -320,7 +401,7 @@ async fn handle_server(
         let device_clone = device.clone();
         let store_clone = store.clone();
         tokio::spawn(async move {
-            let Err(e) = handle_connection(conn, device_clone, store_clone).await;
+            let Err(e) = handle_connection(conn, device_clone, store_clone, mode).await;
             tracing::error!("Incoming connection from {} closed: {}", from, e);
         });
     }

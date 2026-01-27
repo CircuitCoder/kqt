@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use rand_core::RngCore;
 
-const ETH_HDR_LEN: usize = 14;
+pub const ETH_HDR_LEN: usize = 14;
 const IPV4_HDR_LEN: usize = 20;
 const IPV4_HDR_LEN_ENCODED: u8 = 5;
 const ICMPV4_DESTINATION_UNREACHABLE_LEN: usize = 8;
@@ -24,6 +24,7 @@ fn populate_ipv4_packet_too_big(
     buf: &mut [u8],
     pkt_start: usize,
     pkt_len: usize,
+    includes_eth: bool,
 ) -> anyhow::Result<Option<&[u8]>> {
     use pnet_packet::Packet;
     use pnet_packet::icmp::IcmpTypes;
@@ -34,7 +35,13 @@ fn populate_ipv4_packet_too_big(
     use pnet_packet::ipv4::MutableIpv4Packet;
     use pnet_packet::ipv4::{Ipv4Flags, Ipv4Packet};
 
-    let Some(ipv4_orig) = Ipv4Packet::new(&buf[pkt_start + ETH_HDR_LEN..]) else {
+    let ip_start = if includes_eth {
+        pkt_start + ETH_HDR_LEN
+    } else {
+        pkt_start
+    };
+
+    let Some(ipv4_orig) = Ipv4Packet::new(&buf[ip_start..]) else {
         return Ok(None);
     };
     if ipv4_orig.get_flags() & Ipv4Flags::DontFragment == 0 {
@@ -45,16 +52,21 @@ fn populate_ipv4_packet_too_big(
     let ipv4_src = ipv4_orig.get_destination();
     let ipv4_dst = ipv4_orig.get_source();
 
-    // Move ethernet header backward
     let new_pkt_start = pkt_start - (IPV4_HDR_LEN + ICMPV4_DESTINATION_UNREACHABLE_LEN);
-    let (pkt_front, pkt_back) = buf.split_at_mut(pkt_start);
-    let eth_src = &pkt_back[..ETH_HDR_LEN];
-    let eth_dst: &mut [u8] = &mut pkt_front[new_pkt_start..new_pkt_start + ETH_HDR_LEN];
-    invert_eth_header(eth_src, eth_dst);
+
+    // Move ethernet header backward
+    let new_ip_start = if includes_eth {
+        let (pkt_front, pkt_back) = buf.split_at_mut(pkt_start);
+        let eth_src = &pkt_back[..ETH_HDR_LEN];
+        let eth_dst: &mut [u8] = &mut pkt_front[new_pkt_start..new_pkt_start + ETH_HDR_LEN];
+        invert_eth_header(eth_src, eth_dst);
+        new_pkt_start + ETH_HDR_LEN
+    } else {
+        new_pkt_start
+    };
 
     // Re-split buffer
-    let eth_buf = &mut buf[new_pkt_start..];
-    let ipv4_buf = &mut eth_buf[ETH_HDR_LEN..];
+    let ipv4_buf = &mut buf[new_ip_start..];
 
     let icmpv4_payload_len = (pkt_len - ETH_HDR_LEN).min(568);
     let ipv4_payload_len = ICMPV4_DESTINATION_UNREACHABLE_LEN + icmpv4_payload_len;
@@ -93,9 +105,13 @@ fn populate_ipv4_packet_too_big(
     let ipv4_chksum = pnet_packet::ipv4::checksum(&ipv4.to_immutable());
     ipv4.set_checksum(ipv4_chksum);
 
-    Ok(Some(
-        &buf[new_pkt_start..new_pkt_start + ETH_HDR_LEN + ipv4_total_len],
-    ))
+    let pkg_total_len = if includes_eth {
+        ETH_HDR_LEN + ipv4_total_len
+    } else {
+        ipv4_total_len
+    };
+
+    Ok(Some(&buf[new_pkt_start..new_pkt_start + pkg_total_len]))
 }
 
 fn populate_ipv6_packet_too_big(
@@ -103,6 +119,7 @@ fn populate_ipv6_packet_too_big(
     buf: &mut [u8],
     pkt_start: usize,
     pkt_len: usize,
+    includes_eth: bool,
 ) -> anyhow::Result<Option<&[u8]>> {
     use pnet_packet::Packet;
     use pnet_packet::icmpv6::{Icmpv6Code, Icmpv6Types, MutableIcmpv6Packet};
@@ -111,23 +128,34 @@ fn populate_ipv6_packet_too_big(
     // Assert that we have enough space for the header
     assert!(pkt_start >= IPV6_HDR_LEN + ICMPV6_PACKET_TOO_BIG_WITH_MTU_LEN);
 
-    let Some(ipv6_orig) = Ipv6Packet::new(&buf[pkt_start + ETH_HDR_LEN..]) else {
+    let ip_start = if includes_eth {
+        pkt_start + ETH_HDR_LEN
+    } else {
+        pkt_start
+    };
+
+    let Some(ipv6_orig) = Ipv6Packet::new(&buf[ip_start..]) else {
         return Ok(None);
     };
     // Swap src & dst
     let ipv6_src = ipv6_orig.get_destination();
     let ipv6_dst = ipv6_orig.get_source();
 
-    // Move ethernet header backward
     let new_pkt_start = pkt_start - (IPV6_HDR_LEN + ICMPV6_PACKET_TOO_BIG_WITH_MTU_LEN);
-    let (pkt_front, pkt_back) = buf.split_at_mut(pkt_start);
-    let eth_src = &pkt_back[..ETH_HDR_LEN];
-    let eth_dst: &mut [u8] = &mut pkt_front[new_pkt_start..new_pkt_start + ETH_HDR_LEN];
-    invert_eth_header(eth_src, eth_dst);
+
+    // Move ethernet header backward
+    let new_ip_start = if includes_eth {
+        let (pkt_front, pkt_back) = buf.split_at_mut(pkt_start);
+        let eth_src = &pkt_back[..ETH_HDR_LEN];
+        let eth_dst: &mut [u8] = &mut pkt_front[new_pkt_start..new_pkt_start + ETH_HDR_LEN];
+        invert_eth_header(eth_src, eth_dst);
+        new_pkt_start + ETH_HDR_LEN
+    } else {
+        new_pkt_start
+    };
 
     // Re-split buffer
-    let eth_buf = &mut buf[new_pkt_start..];
-    let ipv6_buf = &mut eth_buf[ETH_HDR_LEN..];
+    let ipv6_buf = &mut buf[new_ip_start..];
 
     let icmpv6_payload_len = (pkt_len - ETH_HDR_LEN).min(1232);
     let ipv6_payload_len = ICMPV6_PACKET_TOO_BIG_WITH_MTU_LEN + icmpv6_payload_len;
@@ -163,9 +191,13 @@ fn populate_ipv6_packet_too_big(
     ipv6.set_next_header(pnet_packet::ip::IpNextHeaderProtocols::Icmpv6);
     ipv6.set_payload_length(ipv6_payload_len as u16);
 
-    Ok(Some(
-        &buf[new_pkt_start..new_pkt_start + ETH_HDR_LEN + IPV6_HDR_LEN + ipv6_payload_len],
-    ))
+    let pkg_total_len = if includes_eth {
+        ETH_HDR_LEN + IPV6_HDR_LEN + ipv6_payload_len
+    } else {
+        IPV6_HDR_LEN + ipv6_payload_len
+    };
+
+    Ok(Some(&buf[new_pkt_start..new_pkt_start + pkg_total_len]))
 }
 
 pub fn populate_packet_too_big(
@@ -173,60 +205,81 @@ pub fn populate_packet_too_big(
     buf: &mut [u8],
     pkt_start: usize,
     pkt_len: usize,
+    includes_eth: bool,
 ) -> anyhow::Result<Option<&[u8]>> {
     match buf.get(pkt_start + ETH_HDR_LEN) {
         Some(b) if (b >> 4) == 4 => {
-            populate_ipv4_packet_too_big(outer_mtu, buf, pkt_start, pkt_len)
+            populate_ipv4_packet_too_big(outer_mtu, buf, pkt_start, pkt_len, includes_eth)
         }
         Some(b) if (b >> 4) == 6 => {
-            populate_ipv6_packet_too_big(outer_mtu, buf, pkt_start, pkt_len)
+            populate_ipv6_packet_too_big(outer_mtu, buf, pkt_start, pkt_len, includes_eth)
         }
         _ => Ok(None),
     }
 }
 
-fn is_v4(packet: &[u8]) -> bool {
-    packet
-        .get(ETH_HDR_LEN)
-        .map(|b| (b >> 4) == 4)
-        .unwrap_or(false)
+pub fn ip_is_v4(packet: &[u8]) -> bool {
+    packet.get(0).map(|b| (b >> 4) == 4).unwrap_or(false)
 }
 
-pub fn can_frag(packet: &[u8]) -> bool {
-    if !is_v4(packet) {
+pub fn ip_can_frag(packet: &[u8]) -> bool {
+    if !ip_is_v4(packet) {
         return false;
     }
 
     use pnet_packet::ipv4::Ipv4Packet;
-    let Some(ipv4) = Ipv4Packet::new(&packet[ETH_HDR_LEN..]) else {
+    let Some(ipv4) = Ipv4Packet::new(packet) else {
         return false;
     };
 
     return (ipv4.get_flags() & pnet_packet::ipv4::Ipv4Flags::DontFragment) == 0;
 }
 
+/// Check if a IP packet has more fragments
+/// On V6 packets, always returns false
+///
+/// Directly pass in the IP packet, don't include the Ethernet header
+pub fn ip_has_more_frag(packet: &[u8]) -> bool {
+    if !ip_is_v4(packet) {
+        return false;
+    }
+
+    use pnet_packet::ipv4::Ipv4Packet;
+    let Some(ipv4) = Ipv4Packet::new(&packet) else {
+        return false;
+    };
+
+    (ipv4.get_flags() & pnet_packet::ipv4::Ipv4Flags::MoreFragments) != 0
+}
+
+/// Fragment the packet if needed, returns the possibly modified packet slice
+/// If orig_frag is true, preserves the More Fragments flag from the original packet
+/// Else, clears it if no fragmentation is needed
+///
+/// outer_mtu includes extra_hdr
 pub fn frag_if_needed(
     outer_mtu: usize,
     packet: &mut [u8],
     orig_frag: bool,
+    extra_hdr: usize,
 ) -> anyhow::Result<&[u8]> {
     let needs_frag = packet.len() > outer_mtu;
     let final_len = if needs_frag {
         // Calculate fragment size (must be multiple of 8)
-        let frag_size = (outer_mtu - ETH_HDR_LEN - IPV4_HDR_LEN) & !7;
+        let frag_size = (outer_mtu - extra_hdr - IPV4_HDR_LEN) & !7;
         assert!(frag_size >= 8);
-        ETH_HDR_LEN + IPV4_HDR_LEN + frag_size
+        extra_hdr + IPV4_HDR_LEN + frag_size
     } else {
         packet.len()
     };
 
-    if !is_v4(packet) {
+    if !ip_is_v4(&packet[extra_hdr..]) {
         // Not IPv4, nothing to do
         return Ok(packet);
     }
 
     use pnet_packet::ipv4::MutableIpv4Packet;
-    let mut ipv4 = MutableIpv4Packet::new(&mut packet[ETH_HDR_LEN..])
+    let mut ipv4 = MutableIpv4Packet::new(&mut packet[extra_hdr..])
         .ok_or_else(|| anyhow::anyhow!("Invalid IPv4 packet"))?;
     let flags = if needs_frag || orig_frag {
         // Set More Fragments flag if we are fragmenting or if the original packet was fragmented
@@ -235,36 +288,25 @@ pub fn frag_if_needed(
         ipv4.get_flags() & !pnet_packet::ipv4::Ipv4Flags::MoreFragments
     };
     ipv4.set_flags(flags);
-    ipv4.set_total_length((final_len - ETH_HDR_LEN) as u16);
+    ipv4.set_total_length((final_len - extra_hdr) as u16);
     // Reconculate checksum
     let chksum = pnet_packet::ipv4::checksum(&ipv4.to_immutable());
     ipv4.set_checksum(chksum);
     Ok(&packet[..final_len])
 }
 
-pub fn has_more_frag(packet: &[u8]) -> bool {
-    if !is_v4(packet) {
-        return false;
-    }
-
-    use pnet_packet::ipv4::Ipv4Packet;
-    let Some(ipv4) = Ipv4Packet::new(&packet[ETH_HDR_LEN..]) else {
-        return false;
-    };
-
-    (ipv4.get_flags() & pnet_packet::ipv4::Ipv4Flags::MoreFragments) != 0
-}
-
-pub fn move_frag_headers(sent: usize, packet: &mut [u8]) -> &mut [u8] {
-    assert!(is_v4(packet));
-    assert!(sent > ETH_HDR_LEN + IPV4_HDR_LEN);
-    let dist = sent - (ETH_HDR_LEN + IPV4_HDR_LEN);
-    packet.copy_within(..ETH_HDR_LEN + IPV4_HDR_LEN, dist);
+/// Move header from within the packet, in order to do fragmentation
+/// Has to be called only on IPv4 packets
+/// extra_hdr should be the length of the lower level header that should also be moved
+pub fn move_frag_headers(sent: usize, packet: &mut [u8], extra_hdr: usize) -> &mut [u8] {
+    assert!(ip_is_v4(&packet[extra_hdr..]));
+    assert!(sent > extra_hdr + IPV4_HDR_LEN);
+    let dist = sent - (extra_hdr + IPV4_HDR_LEN);
+    packet.copy_within(..extra_hdr + IPV4_HDR_LEN, dist);
     let new_pkt = &mut packet[dist..];
     // Bump fragment offset
     use pnet_packet::ipv4::MutableIpv4Packet;
-    let mut ipv4 =
-        MutableIpv4Packet::new(&mut new_pkt[ETH_HDR_LEN..]).expect("Invalid IPv4 packet");
+    let mut ipv4 = MutableIpv4Packet::new(&mut new_pkt[extra_hdr..]).expect("Invalid IPv4 packet");
     let old_offset = ipv4.get_fragment_offset();
     assert!(dist % 8 == 0);
     let new_offset = old_offset + (dist / 8) as u16;
@@ -279,31 +321,31 @@ use pnet_packet::tcp::{TcpOptionNumbers, TcpPacket};
 
 /// Clamps the TCP MSS option in an Ethernet frame to the specified value.
 /// Updates the TCP checksum incrementally if modification is performed.
-/// Returns the indices of the MSS option and the chksum
-pub fn clamp_mss<'s>(pkt: &'s [u8], outer_mtu: usize) -> Cow<'s, [u8]> {
+/// Returns the modified packet
+pub fn clamp_mss<'s>(pkt: &'s [u8], outer_mtu: usize, extra_hdr: usize) -> Cow<'s, [u8]> {
     let mut pkt = Cow::Borrowed(pkt);
     // Parse IP Header and find start of TCP
-    let Some(ip_ver) = pkt.get(ETH_HDR_LEN).map(|b| b >> 4) else {
+    let Some(ip_ver) = pkt.get(extra_hdr).map(|b| b >> 4) else {
         return pkt;
     };
     let tcp_offset = match ip_ver {
         4 => {
-            let Some(ipv4) = Ipv4Packet::new(&pkt[ETH_HDR_LEN..]) else {
+            let Some(ipv4) = Ipv4Packet::new(&pkt[extra_hdr..]) else {
                 return pkt;
             };
             if ipv4.get_next_level_protocol() != IpNextHeaderProtocols::Tcp {
                 return pkt;
             }
-            ETH_HDR_LEN + ipv4.get_header_length() as usize * 4
+            extra_hdr + ipv4.get_header_length() as usize * 4
         }
         6 => {
-            let Some(ipv6) = Ipv6Packet::new(&pkt[ETH_HDR_LEN..]) else {
+            let Some(ipv6) = Ipv6Packet::new(&pkt[extra_hdr..]) else {
                 return pkt;
             };
             if ipv6.get_next_header() != IpNextHeaderProtocols::Tcp {
                 return pkt;
             }
-            ETH_HDR_LEN + IPV6_HDR_LEN
+            extra_hdr + IPV6_HDR_LEN
         }
         _ => return pkt, // Unknown IP version
     };
@@ -379,7 +421,7 @@ pub fn clamp_mss<'s>(pkt: &'s [u8], outer_mtu: usize) -> Cow<'s, [u8]> {
 
                 // Calculate new checksum incrementally (RFC 1624 Eq. 3)
                 // HC' = ~(~HC + ~m + m')
-                let new_csum = checksum_incremental_update(old_csum, old_mss, target_mss);
+                let new_csum = tcp_chksum_update(old_csum, old_mss, target_mss);
 
                 // Write new checksum
                 let new_csum_bytes = new_csum.to_be_bytes();
@@ -401,7 +443,7 @@ pub fn clamp_mss<'s>(pkt: &'s [u8], outer_mtu: usize) -> Cow<'s, [u8]> {
 /// `old_csum`: The original checksum field value.
 /// `old_val`: The 16-bit value that was replaced.
 /// `new_val`: The 16-bit value that replaced `old_val`.
-fn checksum_incremental_update(old_csum: u16, old_val: u16, new_val: u16) -> u16 {
+fn tcp_chksum_update(old_csum: u16, old_val: u16, new_val: u16) -> u16 {
     // 1. Negate the old checksum (one's complement)
     let csum_not = (!old_csum) as u32;
 
