@@ -195,7 +195,9 @@ echo -e "${YELLOW}Step 6: Running IPv4 ping tests...${NC}"
 
 # Test 6a: Default sized packets
 echo "Test 6a: Ping with default packet size"
-if sudo ip netns exec "$NS1" ping -c 4 -W 5 10.21.0.2 > /dev/null 2>&1; then
+PING_OUTPUT=$(sudo ip netns exec "$NS1" ping -c 4 -W 5 10.21.0.2 2>&1)
+echo "$PING_OUTPUT"
+if echo "$PING_OUTPUT" | grep -q "bytes of data"; then
     echo -e "${GREEN}✓ Default ping successful${NC}"
 else
     echo -e "${RED}✗ Default ping failed${NC}"
@@ -219,6 +221,7 @@ fi
 echo "Test 6b: Ping with large packets (PMTU discovery enabled)"
 # Use -s 5000 to send packets larger than 2*MTU, with PMTU discovery
 PING_OUTPUT=$(sudo ip netns exec "$NS1" ping -c 4 -W 5 -s 5000 10.21.0.2 2>&1)
+echo "$PING_OUTPUT"
 if echo "$PING_OUTPUT" | grep -q "5000 bytes of data"; then
     echo -e "${GREEN}✓ Large ping with PMTU discovery successful${NC}"
     # Check if fragmentation needed message appears (indicates MTU detection)
@@ -227,14 +230,15 @@ if echo "$PING_OUTPUT" | grep -q "5000 bytes of data"; then
     fi
 else
     echo -e "${RED}✗ Large ping with PMTU discovery failed${NC}"
-    echo "$PING_OUTPUT"
     exit 1
 fi
 
 # Test 6c: Large packets with fragmentation prohibited
 echo "Test 6c: Ping with large packets (fragmentation prohibited)"
 # Use -M do to prohibit fragmentation
-if sudo ip netns exec "$NS1" ping -c 4 -W 5 -s 5000 -M do 10.21.0.2 > /dev/null 2>&1; then
+PING_OUTPUT=$(sudo ip netns exec "$NS1" ping -c 4 -W 5 -s 5000 -M do 10.21.0.2 2>&1)
+echo "$PING_OUTPUT"
+if echo "$PING_OUTPUT" | grep -q "5000 bytes of data"; then
     echo -e "${GREEN}✓ Large ping with fragmentation prohibited successful${NC}"
 else
     # This might fail if MTU is too small, which is expected behavior
@@ -247,7 +251,9 @@ echo -e "${YELLOW}Step 7: Running IPv6 ping tests...${NC}"
 
 # Test 7a: Default sized packets
 echo "Test 7a: IPv6 ping with default packet size"
-if sudo ip netns exec "$NS1" ping6 -c 4 -W 5 fd00::2 > /dev/null 2>&1; then
+PING6_OUTPUT=$(sudo ip netns exec "$NS1" ping6 -c 4 -W 5 fd00::2 2>&1)
+echo "$PING6_OUTPUT"
+if echo "$PING6_OUTPUT" | grep -q "data bytes"; then
     echo -e "${GREEN}✓ IPv6 default ping successful${NC}"
 else
     echo -e "${RED}✗ IPv6 default ping failed${NC}"
@@ -257,11 +263,11 @@ fi
 # Test 7b: Large packets with PMTU discovery
 echo "Test 7b: IPv6 ping with large packets (PMTU discovery enabled)"
 PING6_OUTPUT=$(sudo ip netns exec "$NS1" ping6 -c 4 -W 5 -s 5000 fd00::2 2>&1)
+echo "$PING6_OUTPUT"
 if echo "$PING6_OUTPUT" | grep -q "5000 data bytes"; then
     echo -e "${GREEN}✓ IPv6 large ping with PMTU discovery successful${NC}"
 else
     echo -e "${RED}✗ IPv6 large ping with PMTU discovery failed${NC}"
-    echo "$PING6_OUTPUT"
     exit 1
 fi
 echo ""
