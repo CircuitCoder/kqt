@@ -26,7 +26,7 @@ cat > "$OUTPUT_DIR/node1.toml" <<EOF
 keypair = "$NODE1_PRIVATE"
 anchor = ["$CA_PUBLIC"]
 suffix = "$SUFFIX"
-mtu = 1400
+mtu = 8192
 
 address = ["10.21.0.1/24", "fd00::1/64"]
 
@@ -47,7 +47,7 @@ cat > "$OUTPUT_DIR/node2.toml" <<EOF
 keypair = "$NODE2_PRIVATE"
 anchor = ["$CA_PUBLIC"]
 suffix = "$SUFFIX"
-mtu = 1400
+mtu = 8192
 
 address = ["10.21.0.2/24", "fd00::2/64"]
 
