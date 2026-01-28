@@ -40,7 +40,6 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly-2026-01-18
-          targets: aarch64-linux-android
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -57,7 +56,3 @@ jobs:
       - name: Check unused dependencies in kqt
         working-directory: ./rust
         run: cargo udeps --package kqt --all-targets
-
-      - name: Check unused dependencies in kqt-android
-        working-directory: ./rust
-        run: cargo udeps --package kqt-android --target aarch64-linux-android

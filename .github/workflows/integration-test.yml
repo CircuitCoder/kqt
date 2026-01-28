@@ -33,7 +33,7 @@ jobs:
 
       - name: Build release binaries
         working-directory: ./rust
-        run: cargo build --workspace --release --verbose
+        run: cargo build --bin kqt --release --verbose
 
       - name: Generate certificates
         working-directory: ./rust/tests
