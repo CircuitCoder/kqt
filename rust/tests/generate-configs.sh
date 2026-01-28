@@ -45,14 +45,6 @@ designated_range = ["10.21.0.2/32", "fd00::2/128"]
 EOF
 fi
 
-cat >> "$OUTPUT_DIR/node1.toml" <<EOF
-
-[advanced]
-initial_outer_mtu = 1452
-keepalive = 25
-max_idle_timeout = 60
-EOF
-
 echo "Generating node2 configuration..."
 cat > "$OUTPUT_DIR/node2.toml" <<EOF
 # Node 2 Configuration
@@ -76,14 +68,6 @@ if [ "$MODE" = "L3" ]; then
 designated_range = ["10.21.0.1/32", "fd00::1/128"]
 EOF
 fi
-
-cat >> "$OUTPUT_DIR/node2.toml" <<EOF
-
-[advanced]
-initial_outer_mtu = 1452
-keepalive = 25
-max_idle_timeout = 60
-EOF
 
 echo "Configuration files generated successfully ($MODE mode):"
 echo "  - $OUTPUT_DIR/node1.toml"
