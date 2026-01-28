@@ -5,6 +5,7 @@ set -e
 
 # Configuration
 OUTPUT_DIR="${1:-.}"
+MODE="${2:-L2}"  # Default to L2 mode if not specified
 SUFFIX="test.local"
 NODE1_LISTEN_PORT="${NODE1_LISTEN_PORT:-9001}"
 NODE2_LISTEN_PORT="${NODE2_LISTEN_PORT:-9002}"
@@ -26,6 +27,7 @@ cat > "$OUTPUT_DIR/node1.toml" <<EOF
 keypair = "$NODE1_PRIVATE"
 anchor = ["$CA_PUBLIC"]
 suffix = "$SUFFIX"
+mode = "$MODE"
 mtu = 8192
 
 address = ["10.21.0.1/24", "fd00::1/64"]
@@ -34,12 +36,14 @@ listen = "10.0.0.1:$NODE1_LISTEN_PORT"
 
 [[connect_to]]
 endpoint = "10.0.0.2:$NODE2_LISTEN_PORT"
-
-[advanced]
-initial_outer_mtu = 1452
-keepalive = 25
-max_idle_timeout = 60
 EOF
+
+# Add designated_range for L3 mode
+if [ "$MODE" = "L3" ]; then
+    cat >> "$OUTPUT_DIR/node1.toml" <<EOF
+designated_range = ["10.21.0.2/32", "fd00::2/128"]
+EOF
+fi
 
 echo "Generating node2 configuration..."
 cat > "$OUTPUT_DIR/node2.toml" <<EOF
@@ -47,6 +51,7 @@ cat > "$OUTPUT_DIR/node2.toml" <<EOF
 keypair = "$NODE2_PRIVATE"
 anchor = ["$CA_PUBLIC"]
 suffix = "$SUFFIX"
+mode = "$MODE"
 mtu = 8192
 
 address = ["10.21.0.2/24", "fd00::2/64"]
@@ -55,13 +60,15 @@ listen = "10.0.0.2:$NODE2_LISTEN_PORT"
 
 [[connect_to]]
 endpoint = "10.0.0.1:$NODE1_LISTEN_PORT"
-
-[advanced]
-initial_outer_mtu = 1452
-keepalive = 25
-max_idle_timeout = 60
 EOF
 
-echo "Configuration files generated successfully:"
+# Add designated_range for L3 mode
+if [ "$MODE" = "L3" ]; then
+    cat >> "$OUTPUT_DIR/node2.toml" <<EOF
+designated_range = ["10.21.0.1/32", "fd00::1/128"]
+EOF
+fi
+
+echo "Configuration files generated successfully ($MODE mode):"
 echo "  - $OUTPUT_DIR/node1.toml"
 echo "  - $OUTPUT_DIR/node2.toml"

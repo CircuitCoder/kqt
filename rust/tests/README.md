@@ -5,7 +5,7 @@ This directory contains integration tests for the kqt Rust implementation.
 ## Test Scripts
 
 - **generate-keys.sh** - Generates CA and node keypairs for testing (string format only)
-- **generate-configs.sh** - Generates TOML configuration files for test nodes
+- **generate-configs.sh** - Generates TOML configuration files for test nodes. Takes optional MODE parameter (L2 or L3)
 - **integration-test.sh** - Main integration test script that sets up network namespaces and runs connectivity tests
 
 ## Requirements
@@ -37,6 +37,15 @@ If you encounter these limitations, you can still verify the build and basic fun
    ```bash
    # From the rust directory
    cd tests
+   
+   # Generate keys and configs (L2 mode is the default)
+   bash generate-keys.sh run
+   bash generate-configs.sh run
+   
+   # Or for L3 mode
+   bash generate-configs.sh run L3
+   
+   # Run tests
    sudo bash integration-test.sh
    ```
 
