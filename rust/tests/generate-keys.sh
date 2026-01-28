@@ -12,6 +12,18 @@ KQT_BIN="${KQT_BIN:-$SCRIPT_DIR/../target/release/kqt}"
 # Ensure output directory exists
 mkdir -p "$OUTPUT_DIR"
 
+# Validate KQT_BIN exists and is executable
+if [ ! -f "$KQT_BIN" ]; then
+    echo "Error: kqt binary not found at $KQT_BIN"
+    echo "Please build the project first with: cd rust && cargo build --release"
+    exit 1
+fi
+
+if [ ! -x "$KQT_BIN" ]; then
+    echo "Error: kqt binary at $KQT_BIN is not executable"
+    exit 1
+fi
+
 echo "Generating CA keypair..."
 # Generate self-signed CA
 CA_PRIVATE=$("$KQT_BIN" keygen private --self-signed --suffix "$SUFFIX")

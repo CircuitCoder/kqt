@@ -35,6 +35,7 @@ If you encounter these limitations, you can still verify the build and basic fun
 
 2. Run the integration test:
    ```bash
+   # From the rust directory
    cd tests
    sudo bash integration-test.sh
    ```

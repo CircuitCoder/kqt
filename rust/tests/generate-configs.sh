@@ -8,12 +8,10 @@ OUTPUT_DIR="${1:-.}"
 SUFFIX="test.local"
 NODE1_LISTEN_PORT="${NODE1_LISTEN_PORT:-9001}"
 NODE2_LISTEN_PORT="${NODE2_LISTEN_PORT:-9002}"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-KQT_BIN="${KQT_BIN:-$SCRIPT_DIR/../target/release/kqt}"
 
 # Ensure keys exist
 if [ ! -f "$OUTPUT_DIR/ca-private.txt" ] || [ ! -f "$OUTPUT_DIR/node1-private.txt" ] || [ ! -f "$OUTPUT_DIR/node2-private.txt" ]; then
-    echo "Error: Keys not found. Run generate-keys.sh first."
+    echo "Error: Keys not found. Run: bash generate-keys.sh $OUTPUT_DIR"
     exit 1
 fi
 

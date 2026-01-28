@@ -65,6 +65,12 @@ if [ ! -f "$KQT_BIN" ]; then
     exit 1
 fi
 
+# Check if kqt binary is executable
+if [ ! -x "$KQT_BIN" ]; then
+    echo -e "${RED}Error: kqt binary at $KQT_BIN is not executable${NC}"
+    exit 1
+fi
+
 # Create working directory
 mkdir -p "$WORK_DIR"
 cd "$TEST_DIR"
@@ -92,7 +98,7 @@ fi
 # Step 3: Set up network namespaces with veth pair
 echo -e "${YELLOW}Step 3: Setting up network namespaces with veth pair...${NC}"
 
-# Clean up any existing setup
+# Clean up any existing setup (intentionally called to ensure clean state)
 cleanup
 
 # Enable IP forwarding (required for network namespaces)
@@ -227,7 +233,7 @@ fi
 
 # Test 6c: Large packets with fragmentation prohibited
 echo "Test 6c: Ping with large packets (fragmentation prohibited)"
-# Use -M do to prohibit fragmentation (similar to -M dont)
+# Use -M do to prohibit fragmentation
 if sudo ip netns exec "$NS1" ping -c 4 -W 5 -s 1450 -M do 10.21.0.2 > /dev/null 2>&1; then
     echo -e "${GREEN}✓ Large ping with fragmentation prohibited successful${NC}"
 else
