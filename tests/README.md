@@ -41,7 +41,7 @@ If you encounter these limitations, you can still verify the build and basic fun
 
    The test will:
    - Generate CA and node certificates
-   - Create two network namespaces with a bridge between them
+   - Create two network namespaces with a direct veth pair connection
    - Start kqt nodes in each namespace
    - Verify TUN/TAP device creation
    - Run connectivity tests (IPv4 and IPv6 pings with various packet sizes)

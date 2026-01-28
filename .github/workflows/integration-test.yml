@@ -38,8 +38,8 @@ jobs:
           # Set KQT_BIN to the built binary
           export KQT_BIN="$(pwd)/../rust/target/release/kqt"
           
-          # Run the integration test
-          bash integration-test.sh
+          # Run the integration test with sudo
+          sudo -E bash integration-test.sh
 
       - name: Upload test logs on failure
         if: failure()

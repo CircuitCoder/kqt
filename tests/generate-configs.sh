@@ -11,7 +11,7 @@ NODE2_LISTEN_PORT="${NODE2_LISTEN_PORT:-9002}"
 KQT_BIN="${KQT_BIN:-$(dirname "$0")/../rust/target/release/kqt}"
 
 # Ensure keys exist
-if [ ! -f "$OUTPUT_DIR/ca.pem" ] || [ ! -f "$OUTPUT_DIR/node1-private.key" ] || [ ! -f "$OUTPUT_DIR/node2-private.key" ]; then
+if [ ! -f "$OUTPUT_DIR/ca-private.key" ] || [ ! -f "$OUTPUT_DIR/node1-private.key" ] || [ ! -f "$OUTPUT_DIR/node2-private.key" ]; then
     echo "Error: Keys not found. Run generate-keys.sh first."
     exit 1
 fi

@@ -29,10 +29,11 @@ cleanup() {
     echo -e "${YELLOW}Cleaning up...${NC}"
     
     # Kill any running kqt processes by PID if they exist
-    if [ -n "$NODE1_PID" ] && kill -0 "$NODE1_PID" 2>/dev/null; then
+    # Note: These PIDs may be sudo wrapper PIDs, but killing them will stop the kqt processes
+    if [ -n "$NODE1_PID" ] && ps -p "$NODE1_PID" > /dev/null 2>&1; then
         sudo kill "$NODE1_PID" 2>/dev/null || true
     fi
-    if [ -n "$NODE2_PID" ] && kill -0 "$NODE2_PID" 2>/dev/null; then
+    if [ -n "$NODE2_PID" ] && ps -p "$NODE2_PID" > /dev/null 2>&1; then
         sudo kill "$NODE2_PID" 2>/dev/null || true
     fi
     sleep 1
@@ -78,7 +79,7 @@ echo -e "${YELLOW}Step 2: Generating configuration files...${NC}"
 bash generate-configs.sh "$WORK_DIR"
 echo ""
 
-# Step 3: Set up network namespaces and bridge
+# Step 3: Set up network namespaces with veth pair
 echo -e "${YELLOW}Step 3: Setting up network namespaces with veth pair...${NC}"
 
 # Clean up any existing setup
@@ -184,7 +185,8 @@ else
     echo -e "${RED}✗ Default ping failed${NC}"
     echo "Checking node logs for errors..."
     if grep -q "Operation not permitted" "$WORK_DIR/node1.log" "$WORK_DIR/node2.log" 2>/dev/null; then
-        echo -e "${YELLOW}⚠ Network namespace sendmsg permission denied - this is a known limitation in some sandbox environments${NC}"
+        echo -e "${YELLOW}⚠ UDP socket operations are being denied with 'Operation not permitted'${NC}"
+        echo -e "${YELLOW}  This is a known limitation in some sandbox environments.${NC}"
         echo -e "${YELLOW}  The integration test cannot proceed further in this environment.${NC}"
         echo ""
         echo "Node1 log:"
