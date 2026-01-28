@@ -217,9 +217,9 @@ fi
 
 # Test 6b: Large packets with PMTU discovery
 echo "Test 6b: Ping with large packets (PMTU discovery enabled)"
-# Use -s 1450 to send packets larger than MTU, with PMTU discovery
-PING_OUTPUT=$(sudo ip netns exec "$NS1" ping -c 4 -W 5 -s 1450 10.21.0.2 2>&1)
-if echo "$PING_OUTPUT" | grep -q "1450 bytes of data"; then
+# Use -s 5000 to send packets larger than 2*MTU, with PMTU discovery
+PING_OUTPUT=$(sudo ip netns exec "$NS1" ping -c 4 -W 5 -s 5000 10.21.0.2 2>&1)
+if echo "$PING_OUTPUT" | grep -q "5000 bytes of data"; then
     echo -e "${GREEN}✓ Large ping with PMTU discovery successful${NC}"
     # Check if fragmentation needed message appears (indicates MTU detection)
     if echo "$PING_OUTPUT" | grep -qi "mtu\|frag"; then
@@ -234,7 +234,7 @@ fi
 # Test 6c: Large packets with fragmentation prohibited
 echo "Test 6c: Ping with large packets (fragmentation prohibited)"
 # Use -M do to prohibit fragmentation
-if sudo ip netns exec "$NS1" ping -c 4 -W 5 -s 1450 -M do 10.21.0.2 > /dev/null 2>&1; then
+if sudo ip netns exec "$NS1" ping -c 4 -W 5 -s 5000 -M do 10.21.0.2 > /dev/null 2>&1; then
     echo -e "${GREEN}✓ Large ping with fragmentation prohibited successful${NC}"
 else
     # This might fail if MTU is too small, which is expected behavior
@@ -256,8 +256,8 @@ fi
 
 # Test 7b: Large packets with PMTU discovery
 echo "Test 7b: IPv6 ping with large packets (PMTU discovery enabled)"
-PING6_OUTPUT=$(sudo ip netns exec "$NS1" ping6 -c 4 -W 5 -s 1450 fd00::2 2>&1)
-if echo "$PING6_OUTPUT" | grep -q "1450 data bytes"; then
+PING6_OUTPUT=$(sudo ip netns exec "$NS1" ping6 -c 4 -W 5 -s 5000 fd00::2 2>&1)
+if echo "$PING6_OUTPUT" | grep -q "5000 data bytes"; then
     echo -e "${GREEN}✓ IPv6 large ping with PMTU discovery successful${NC}"
 else
     echo -e "${RED}✗ IPv6 large ping with PMTU discovery failed${NC}"
