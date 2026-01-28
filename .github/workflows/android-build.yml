@@ -24,13 +24,13 @@ jobs:
           toolchain: nightly-2026-01-18
           targets: aarch64-linux-android
 
-      - name: Install cargo-ndk
-        run: cargo install cargo-ndk --locked
-
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
 
       - name: Build native library with cargo-ndk
         working-directory: ./rust/kqt-android
