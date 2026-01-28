@@ -1,10 +1,10 @@
 # KQT Integration Tests
 
-This directory contains integration tests for the kqt project.
+This directory contains integration tests for the kqt Rust implementation.
 
 ## Test Scripts
 
-- **generate-keys.sh** - Generates CA and node keypairs for testing
+- **generate-keys.sh** - Generates CA and node keypairs for testing (string format only)
 - **generate-configs.sh** - Generates TOML configuration files for test nodes
 - **integration-test.sh** - Main integration test script that sets up network namespaces and runs connectivity tests
 
@@ -40,7 +40,7 @@ If you encounter these limitations, you can still verify the build and basic fun
    ```
 
    The test will:
-   - Generate CA and node certificates
+   - Generate CA and node certificates (string format, stored in .txt and .cert files)
    - Create two network namespaces with a direct veth pair connection
    - Start kqt nodes in each namespace
    - Verify TUN/TAP device creation
@@ -49,7 +49,7 @@ If you encounter these limitations, you can still verify the build and basic fun
 
 ## Environment Variables
 
-- `KQT_BIN` - Path to the kqt binary (default: `../rust/target/release/kqt`)
+- `KQT_BIN` - Path to the kqt binary (default: `../target/release/kqt`)
 - `WORK_DIR` - Working directory for test files (default: `./run`)
 - `NODE1_LISTEN_PORT` - Port for node1 (default: 9001)
 - `NODE2_LISTEN_PORT` - Port for node2 (default: 9002)
@@ -61,3 +61,15 @@ Test logs are saved to `$WORK_DIR/node1.log` and `$WORK_DIR/node2.log` (default:
 ## GitHub Actions
 
 The integration test runs automatically in GitHub Actions on push and pull requests. See `.github/workflows/integration-test.yml`.
+
+## Key Files Generated
+
+The test generates the following files in string format (not PEM):
+- `ca-private.txt` - CA private key
+- `ca-public.cert` - CA public certificate
+- `node1-private.txt` - Node 1 private key
+- `node1-public.cert` - Node 1 public certificate
+- `node2-private.txt` - Node 2 private key
+- `node2-public.cert` - Node 2 public certificate
+- `node1.toml` - Node 1 configuration
+- `node2.toml` - Node 2 configuration

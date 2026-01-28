@@ -32,11 +32,32 @@ jobs:
         working-directory: ./rust
         run: cargo build --workspace --release --verbose
 
-      - name: Run integration tests
-        working-directory: ./tests
+      - name: Generate certificates
+        working-directory: ./rust/tests
         run: |
           # Set KQT_BIN to the built binary
-          export KQT_BIN="$(pwd)/../rust/target/release/kqt"
+          export KQT_BIN="$(pwd)/../target/release/kqt"
+          
+          # Create work directory
+          mkdir -p run
+          
+          # Generate certificates
+          bash generate-keys.sh run
+
+      - name: Generate configurations
+        working-directory: ./rust/tests
+        run: |
+          # Set KQT_BIN to the built binary
+          export KQT_BIN="$(pwd)/../target/release/kqt"
+          
+          # Generate configurations
+          bash generate-configs.sh run
+
+      - name: Run integration tests
+        working-directory: ./rust/tests
+        run: |
+          # Set KQT_BIN to the built binary
+          export KQT_BIN="$(pwd)/../target/release/kqt"
           
           # Run the integration test with sudo
           sudo -E bash integration-test.sh
@@ -46,5 +67,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-logs
-          path: tests/run/*.log
+          path: rust/tests/run/*.log
           if-no-files-found: ignore

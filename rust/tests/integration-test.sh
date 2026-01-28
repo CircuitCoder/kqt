@@ -6,7 +6,7 @@ set -e
 # Configuration
 TEST_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORK_DIR="${WORK_DIR:-$TEST_DIR/run}"
-KQT_BIN="${KQT_BIN:-$TEST_DIR/../rust/target/release/kqt}"
+KQT_BIN="${KQT_BIN:-$TEST_DIR/../target/release/kqt}"
 
 # Network configuration
 NS1="kqt-test-ns1"
@@ -69,15 +69,25 @@ fi
 mkdir -p "$WORK_DIR"
 cd "$TEST_DIR"
 
-# Step 1: Generate keys
-echo -e "${YELLOW}Step 1: Generating CA and keypairs...${NC}"
-bash generate-keys.sh "$WORK_DIR"
-echo ""
+# Step 1: Generate keys (if not already present)
+if [ ! -f "$WORK_DIR/ca-private.txt" ]; then
+    echo -e "${YELLOW}Step 1: Generating CA and keypairs...${NC}"
+    bash generate-keys.sh "$WORK_DIR"
+    echo ""
+else
+    echo -e "${YELLOW}Step 1: Using existing CA and keypairs...${NC}"
+    echo ""
+fi
 
-# Step 2: Generate configs
-echo -e "${YELLOW}Step 2: Generating configuration files...${NC}"
-bash generate-configs.sh "$WORK_DIR"
-echo ""
+# Step 2: Generate configs (if not already present)
+if [ ! -f "$WORK_DIR/node1.toml" ]; then
+    echo -e "${YELLOW}Step 2: Generating configuration files...${NC}"
+    bash generate-configs.sh "$WORK_DIR"
+    echo ""
+else
+    echo -e "${YELLOW}Step 2: Using existing configuration files...${NC}"
+    echo ""
+fi
 
 # Step 3: Set up network namespaces with veth pair
 echo -e "${YELLOW}Step 3: Setting up network namespaces with veth pair...${NC}"

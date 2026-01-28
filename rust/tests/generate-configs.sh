@@ -8,18 +8,19 @@ OUTPUT_DIR="${1:-.}"
 SUFFIX="test.local"
 NODE1_LISTEN_PORT="${NODE1_LISTEN_PORT:-9001}"
 NODE2_LISTEN_PORT="${NODE2_LISTEN_PORT:-9002}"
-KQT_BIN="${KQT_BIN:-$(dirname "$0")/../rust/target/release/kqt}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+KQT_BIN="${KQT_BIN:-$SCRIPT_DIR/../target/release/kqt}"
 
 # Ensure keys exist
-if [ ! -f "$OUTPUT_DIR/ca-private.key" ] || [ ! -f "$OUTPUT_DIR/node1-private.key" ] || [ ! -f "$OUTPUT_DIR/node2-private.key" ]; then
+if [ ! -f "$OUTPUT_DIR/ca-private.txt" ] || [ ! -f "$OUTPUT_DIR/node1-private.txt" ] || [ ! -f "$OUTPUT_DIR/node2-private.txt" ]; then
     echo "Error: Keys not found. Run generate-keys.sh first."
     exit 1
 fi
 
 # Read keys
-CA_PUBLIC=$(cat "$OUTPUT_DIR/ca-private.key" | "$KQT_BIN" keygen public --format string --suffix "$SUFFIX")
-NODE1_PRIVATE=$(cat "$OUTPUT_DIR/node1-private.key")
-NODE2_PRIVATE=$(cat "$OUTPUT_DIR/node2-private.key")
+CA_PUBLIC=$(cat "$OUTPUT_DIR/ca-public.cert")
+NODE1_PRIVATE=$(cat "$OUTPUT_DIR/node1-private.txt")
+NODE2_PRIVATE=$(cat "$OUTPUT_DIR/node2-private.txt")
 
 echo "Generating node1 configuration..."
 cat > "$OUTPUT_DIR/node1.toml" <<EOF
