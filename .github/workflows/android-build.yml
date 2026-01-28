@@ -38,16 +38,6 @@ jobs:
         working-directory: ./rust/kqt-android
         run: chmod +x gradlew
 
-      - name: Cache Gradle dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
-
       - name: Build debug APK
         working-directory: ./rust/kqt-android
         run: ./gradlew assembleDebug --stacktrace

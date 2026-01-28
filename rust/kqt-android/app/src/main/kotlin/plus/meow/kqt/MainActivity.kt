@@ -16,7 +16,7 @@ class MainActivity : NativeActivity() {
         super.onCreate(savedInstanceState)
     }
 
-    override fun onNewIntent(intent: Intent?) {
+    override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
 
         notifyOnNewIntent()
