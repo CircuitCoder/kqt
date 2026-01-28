@@ -52,9 +52,20 @@ jobs:
         working-directory: ./rust/kqt-android
         run: ./gradlew assembleDebug --stacktrace
 
+      - name: Build release APK
+        working-directory: ./rust/kqt-android
+        run: ./gradlew assembleRelease --stacktrace
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: kqt-android-debug-${{ steps.git-info.outputs.sha_short }}
           path: rust/kqt-android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: kqt-android-release-${{ steps.git-info.outputs.sha_short }}
+          path: rust/kqt-android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
