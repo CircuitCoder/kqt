@@ -1,0 +1,28 @@
+# Node 2 Configuration
+keypair = "s.19USC/UniWtZqJqKmpnnGVeUW6Vc1PnlkyxrNTeQ4uM=.u1s85FOxYeSwNvcRHCZX/I7AqlKNGW+a+B1onaqyfg8=./5mSKL6wYjRgJnsJcbCF+zYEkgwqfzy7JmO6rWwsW5FHEUZwxbNKA2nKCEPD8cyKvNS5zsrB16X51bxV/eCVBQ=="
+anchor = ["""
+-----BEGIN CERTIFICATE-----
+MIIBhTCCATegAwIBAgIUALtbPORTsWHksDb3ERwmV/yOwKowBQYDK2VwMFYxVDBS
+BgNVBAMMS2JiNWIzY2U0NTNiMTYxZTRiMDM2ZjcxMTFjMjY1N2ZjOGVjMGFhNTI4
+ZDE5NmY5YWY4MWQ2ODlkYWFiMjdlMGYudGVzdC5sb2NhbDAiGA8xOTcwMDEwMTAw
+MDAwMFoYDzk5OTkxMjMxMjM1OTU5WjBWMVQwUgYDVQQDDEtiYjViM2NlNDUzYjE2
+MWU0YjAzNmY3MTExYzI2NTdmYzhlYzBhYTUyOGQxOTZmOWFmODFkNjg5ZGFhYjI3
+ZTBmLnRlc3QubG9jYWwwKjAFBgMrZXADIQC7WzzkU7Fh5LA29xEcJlf8jsCqUo0Z
+b5r4HWidqrJ+D6MTMBEwDwYDVR0TAQH/BAUwAwEB/zAFBgMrZXADQQBPEK6jPNSR
+qoEJ/UuBrFgdRymf50MhkNr9DcxWK88jqNsQ4EBIin7oyr5a+reJ8KsUHZtSXMQd
+CT6Xw2mY13YN
+-----END CERTIFICATE-----"""]
+suffix = "test.local"
+mtu = 1400
+
+address = ["10.21.0.2/24", "fd00::2/64"]
+
+listen = "10.0.0.2:9002"
+
+[[connect_to]]
+endpoint = "10.0.0.1:9001"
+
+[advanced]
+initial_outer_mtu = 1452
+keepalive = 25
+max_idle_timeout = 60
