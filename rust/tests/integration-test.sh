@@ -247,23 +247,24 @@ else
     exit 1
 fi
 
-# Test 6c: Large packets with fragmentation prohibited
-echo "Test 6c: Ping with large packets (fragmentation prohibited)"
-# Use -M do to prohibit fragmentation
-PING_OUTPUT=$(sudo ip netns exec "$NS1" ping -c 4 -W 5 -s 5000 -M do 10.21.0.2 2>&1 || true)
+# Test 6c: Large packets with fragmentation allowed in middle boxes
+echo "Test 6c: Ping with large packets (force enable fragmentation in middle boxes)"
+# Use -M dont to allow fragmentation by routers/middleboxes
+PING_OUTPUT=$(sudo ip netns exec "$NS1" ping -c 4 -W 5 -s 5000 -M dont 10.21.0.2 2>&1 || true)
 echo "$PING_OUTPUT"
-# Check if we got any responses
+# Check if we got any responses - all packets should be received with fragmentation allowed
 if echo "$PING_OUTPUT" | grep -q " received"; then
     RECEIVED=$(echo "$PING_OUTPUT" | grep "packets transmitted" | awk '{print $4}')
-    if [ "$RECEIVED" != "0" ]; then
-        echo -e "${GREEN}✓ Large ping with fragmentation prohibited successful${NC}"
+    TRANSMITTED=$(echo "$PING_OUTPUT" | grep "packets transmitted" | awk '{print $1}')
+    if [ "$RECEIVED" = "$TRANSMITTED" ]; then
+        echo -e "${GREEN}✓ Large ping with fragmentation allowed successful (all packets received)${NC}"
     else
-        # This might fail if MTU is too small, which is expected behavior
-        echo -e "${YELLOW}⚠ Large ping with fragmentation prohibited may have failed (expected if MTU < packet size)${NC}"
+        echo -e "${RED}✗ Large ping with fragmentation allowed failed (only $RECEIVED/$TRANSMITTED packets received)${NC}"
+        exit 1
     fi
 else
-    # No statistics means ping failed completely
-    echo -e "${YELLOW}⚠ Large ping with fragmentation prohibited may have failed (expected if MTU < packet size)${NC}"
+    echo -e "${RED}✗ Large ping with fragmentation allowed failed (no statistics)${NC}"
+    exit 1
 fi
 echo ""
 
