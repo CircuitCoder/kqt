@@ -67,6 +67,15 @@ impl Mode {
             }
         }
     }
+
+    fn alpn(&self) -> Vec<u8> {
+        let mut v = KQT_PROTO_VERSION.to_vec();
+        match self {
+            Mode::L2 => v.extend_from_slice(b"/L2"),
+            Mode::L3 => v.extend_from_slice(b"/L3"),
+        }
+        v
+    }
 }
 
 pub enum IfaceSetup {
@@ -175,7 +184,7 @@ pub async fn run(iface: IfaceSetup, cfg: crate::config::Config) -> anyhow::Resul
         let mut server_crypto = rustls::ServerConfig::builder_with_protocol_versions(&[&TLS13])
             .with_client_cert_verifier(verifier.clone())
             .with_single_cert(vec![cert], key)?;
-        server_crypto.alpn_protocols = vec![KQT_PROTO_VERSION.to_vec()];
+        server_crypto.alpn_protocols = vec![cfg.mode.alpn()];
         let mut server_cfg =
             quinn::ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(server_crypto)?));
         server_cfg.transport_config(transport.clone());
