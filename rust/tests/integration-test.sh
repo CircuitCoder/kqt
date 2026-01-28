@@ -195,7 +195,7 @@ echo -e "${YELLOW}Step 6: Running IPv4 ping tests...${NC}"
 
 # Test 6a: Default sized packets
 echo "Test 6a: Ping with default packet size"
-PING_OUTPUT=$(sudo ip netns exec "$NS1" ping -c 4 -W 5 10.21.0.2 2>&1)
+PING_OUTPUT=$(sudo ip netns exec "$NS1" ping -c 4 -W 5 10.21.0.2 2>&1 || true)
 echo "$PING_OUTPUT"
 # Check if ping ran and got any responses
 if echo "$PING_OUTPUT" | grep -q " received"; then
@@ -227,7 +227,7 @@ fi
 # Test 6b: Large packets with PMTU discovery
 echo "Test 6b: Ping with large packets (PMTU discovery enabled)"
 # Use -s 5000 to send packets larger than 2*MTU, with PMTU discovery
-PING_OUTPUT=$(sudo ip netns exec "$NS1" ping -c 4 -W 5 -s 5000 10.21.0.2 2>&1)
+PING_OUTPUT=$(sudo ip netns exec "$NS1" ping -c 4 -W 5 -s 5000 10.21.0.2 2>&1 || true)
 echo "$PING_OUTPUT"
 # Check if we got any responses (the first ping may fail, but later ones should succeed)
 if echo "$PING_OUTPUT" | grep -q " received"; then
@@ -250,7 +250,7 @@ fi
 # Test 6c: Large packets with fragmentation prohibited
 echo "Test 6c: Ping with large packets (fragmentation prohibited)"
 # Use -M do to prohibit fragmentation
-PING_OUTPUT=$(sudo ip netns exec "$NS1" ping -c 4 -W 5 -s 5000 -M do 10.21.0.2 2>&1)
+PING_OUTPUT=$(sudo ip netns exec "$NS1" ping -c 4 -W 5 -s 5000 -M do 10.21.0.2 2>&1 || true)
 echo "$PING_OUTPUT"
 # Check if we got any responses
 if echo "$PING_OUTPUT" | grep -q " received"; then
@@ -272,7 +272,7 @@ echo -e "${YELLOW}Step 7: Running IPv6 ping tests...${NC}"
 
 # Test 7a: Default sized packets
 echo "Test 7a: IPv6 ping with default packet size"
-PING6_OUTPUT=$(sudo ip netns exec "$NS1" ping6 -c 4 -W 5 fd00::2 2>&1)
+PING6_OUTPUT=$(sudo ip netns exec "$NS1" ping6 -c 4 -W 5 fd00::2 2>&1 || true)
 echo "$PING6_OUTPUT"
 # Check if ping ran and got any responses
 if echo "$PING6_OUTPUT" | grep -q " received"; then
@@ -290,7 +290,7 @@ fi
 
 # Test 7b: Large packets with PMTU discovery
 echo "Test 7b: IPv6 ping with large packets (PMTU discovery enabled)"
-PING6_OUTPUT=$(sudo ip netns exec "$NS1" ping6 -c 4 -W 5 -s 5000 fd00::2 2>&1)
+PING6_OUTPUT=$(sudo ip netns exec "$NS1" ping6 -c 4 -W 5 -s 5000 fd00::2 2>&1 || true)
 echo "$PING6_OUTPUT"
 # Check if we got any responses (the first ping may fail, but later ones should succeed)
 if echo "$PING6_OUTPUT" | grep -q " received"; then
