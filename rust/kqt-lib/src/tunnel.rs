@@ -248,7 +248,7 @@ pub async fn run(iface: IfaceSetup, cfg: crate::config::Config) -> anyhow::Resul
         .with_custom_certificate_verifier(verifier)
         .with_client_auth_cert(vec![cert], sk)?;
     client_crypto.enable_sni = false; // Disable SNI
-    client_crypto.alpn_protocols = vec![KQT_PROTO_VERSION.to_vec()];
+    client_crypto.alpn_protocols = vec![cfg.mode.alpn()];
     let client_crypto: Arc<rustls::ClientConfig> = Arc::new(client_crypto);
     let mut client_cfg: quinn::ClientConfig =
         quinn::ClientConfig::new(Arc::new(QuicClientConfig::try_from(client_crypto)?));
