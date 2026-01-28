@@ -24,17 +24,17 @@ jobs:
           toolchain: nightly-2026-01-18
           targets: aarch64-linux-android
 
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
 
-      - name: Install cargo-udeps
-        run: cargo install cargo-udeps --locked
-
-      - name: Check unused dependencies in kqt-android
-        working-directory: ./rust
-        run: cargo udeps --package kqt-android --target aarch64-linux-android
+      - name: Build native library with cargo-ndk
+        working-directory: ./rust/kqt-android
+        run: cargo ndk -t arm64-v8a -o app/src/main/jniLibs/ build --release
 
       - name: Get commit SHA
         id: git-info
