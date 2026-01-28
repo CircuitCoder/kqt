@@ -9,10 +9,13 @@ on:
 
 jobs:
   integration-test:
-    name: Integration Tests
+    name: Integration Tests (${{ matrix.mode }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    strategy:
+      matrix:
+        mode: [L2, L3]
 
     steps:
       - name: Checkout code
@@ -51,7 +54,7 @@ jobs:
           export KQT_BIN="$(pwd)/../target/release/kqt"
           
           # Generate configurations
-          bash generate-configs.sh run
+          bash generate-configs.sh run ${{ matrix.mode }}
 
       - name: Run integration tests
         working-directory: ./rust/tests
