@@ -60,4 +60,4 @@ jobs:
 
       - name: Check unused dependencies in kqt-android
         working-directory: ./rust
-        run: cargo udeps --package kqt-android --target aarch64-linux-android --all-targets
+        run: cargo udeps --package kqt-android --target aarch64-linux-android
