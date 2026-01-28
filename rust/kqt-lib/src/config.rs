@@ -1,5 +1,6 @@
 use std::net::{IpAddr, SocketAddr};
 
+use cidr::IpInet;
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug)]
@@ -53,9 +54,8 @@ impl Default for Mode {
 #[derive(Deserialize, Debug)]
 pub struct ConnectTo {
     pub endpoint: SocketAddr,
-    pub san: Option<String>,
     #[serde(default)]
-    pub designated_ip: Vec<IpAddr>,
+    pub designated_range: Vec<IpInet>,
 }
 
 #[derive(Deserialize, Debug)]

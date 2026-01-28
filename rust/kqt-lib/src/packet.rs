@@ -2,7 +2,6 @@ use std::borrow::Cow;
 
 use rand_core::RngCore;
 
-pub const ETH_HDR_LEN: usize = 14;
 const IPV4_HDR_LEN: usize = 20;
 const IPV4_HDR_LEN_ENCODED: u8 = 5;
 const ICMPV4_DESTINATION_UNREACHABLE_LEN: usize = 8;
@@ -20,11 +19,11 @@ fn invert_eth_header(src: &[u8], dst: &mut [u8]) {
 }
 
 fn populate_ipv4_packet_too_big(
-    outer_mtu: usize,
+    inner_mtu: usize,
     buf: &mut [u8],
     pkt_start: usize,
     pkt_len: usize,
-    includes_eth: bool,
+    eth_extra_hdr: Option<usize>,
 ) -> anyhow::Result<Option<&[u8]>> {
     use pnet_packet::Packet;
     use pnet_packet::icmp::IcmpTypes;
@@ -35,11 +34,8 @@ fn populate_ipv4_packet_too_big(
     use pnet_packet::ipv4::MutableIpv4Packet;
     use pnet_packet::ipv4::{Ipv4Flags, Ipv4Packet};
 
-    let ip_start = if includes_eth {
-        pkt_start + ETH_HDR_LEN
-    } else {
-        pkt_start
-    };
+    let ip_start = pkt_start + eth_extra_hdr.unwrap_or(0);
+    let ip_len = pkt_len - eth_extra_hdr.unwrap_or(0);
 
     let Some(ipv4_orig) = Ipv4Packet::new(&buf[ip_start..]) else {
         return Ok(None);
@@ -55,12 +51,12 @@ fn populate_ipv4_packet_too_big(
     let new_pkt_start = pkt_start - (IPV4_HDR_LEN + ICMPV4_DESTINATION_UNREACHABLE_LEN);
 
     // Move ethernet header backward
-    let new_ip_start = if includes_eth {
+    let new_ip_start = if let Some(extra_hdr) = eth_extra_hdr {
         let (pkt_front, pkt_back) = buf.split_at_mut(pkt_start);
-        let eth_src = &pkt_back[..ETH_HDR_LEN];
-        let eth_dst: &mut [u8] = &mut pkt_front[new_pkt_start..new_pkt_start + ETH_HDR_LEN];
+        let eth_src = &pkt_back[..extra_hdr];
+        let eth_dst: &mut [u8] = &mut pkt_front[new_pkt_start..new_pkt_start + extra_hdr];
         invert_eth_header(eth_src, eth_dst);
-        new_pkt_start + ETH_HDR_LEN
+        new_pkt_start + extra_hdr
     } else {
         new_pkt_start
     };
@@ -68,7 +64,7 @@ fn populate_ipv4_packet_too_big(
     // Re-split buffer
     let ipv4_buf = &mut buf[new_ip_start..];
 
-    let icmpv4_payload_len = (pkt_len - ETH_HDR_LEN).min(568);
+    let icmpv4_payload_len = ip_len.min(568);
     let ipv4_payload_len = ICMPV4_DESTINATION_UNREACHABLE_LEN + icmpv4_payload_len;
     let ipv4_total_len = IPV4_HDR_LEN + ipv4_payload_len;
 
@@ -80,7 +76,7 @@ fn populate_ipv4_packet_too_big(
     icmpv4.set_icmp_type(IcmpTypes::DestinationUnreachable);
     icmpv4.set_icmp_code(IcmpCodes::FragmentationRequiredAndDFFlagSet);
     icmpv4.set_unused(0);
-    icmpv4.set_next_hop_mtu((outer_mtu - ETH_HDR_LEN) as u16);
+    icmpv4.set_next_hop_mtu(inner_mtu as u16);
 
     // Compute ICMP checksum
     let icmpv4_chksum = pnet_packet::util::checksum(&icmpv4.packet()[..ipv4_payload_len], 1);
@@ -105,21 +101,17 @@ fn populate_ipv4_packet_too_big(
     let ipv4_chksum = pnet_packet::ipv4::checksum(&ipv4.to_immutable());
     ipv4.set_checksum(ipv4_chksum);
 
-    let pkg_total_len = if includes_eth {
-        ETH_HDR_LEN + ipv4_total_len
-    } else {
-        ipv4_total_len
-    };
+    let pkg_total_len = ipv4_total_len + eth_extra_hdr.unwrap_or(0);
 
     Ok(Some(&buf[new_pkt_start..new_pkt_start + pkg_total_len]))
 }
 
 fn populate_ipv6_packet_too_big(
-    outer_mtu: usize,
+    inner_mtu: usize,
     buf: &mut [u8],
     pkt_start: usize,
     pkt_len: usize,
-    includes_eth: bool,
+    eth_extra_hdr: Option<usize>,
 ) -> anyhow::Result<Option<&[u8]>> {
     use pnet_packet::Packet;
     use pnet_packet::icmpv6::{Icmpv6Code, Icmpv6Types, MutableIcmpv6Packet};
@@ -128,11 +120,8 @@ fn populate_ipv6_packet_too_big(
     // Assert that we have enough space for the header
     assert!(pkt_start >= IPV6_HDR_LEN + ICMPV6_PACKET_TOO_BIG_WITH_MTU_LEN);
 
-    let ip_start = if includes_eth {
-        pkt_start + ETH_HDR_LEN
-    } else {
-        pkt_start
-    };
+    let ip_start = pkt_start + eth_extra_hdr.unwrap_or(0);
+    let ip_len = pkt_len - eth_extra_hdr.unwrap_or(0);
 
     let Some(ipv6_orig) = Ipv6Packet::new(&buf[ip_start..]) else {
         return Ok(None);
@@ -144,12 +133,12 @@ fn populate_ipv6_packet_too_big(
     let new_pkt_start = pkt_start - (IPV6_HDR_LEN + ICMPV6_PACKET_TOO_BIG_WITH_MTU_LEN);
 
     // Move ethernet header backward
-    let new_ip_start = if includes_eth {
+    let new_ip_start = if let Some(extra_hdr) = eth_extra_hdr {
         let (pkt_front, pkt_back) = buf.split_at_mut(pkt_start);
-        let eth_src = &pkt_back[..ETH_HDR_LEN];
-        let eth_dst: &mut [u8] = &mut pkt_front[new_pkt_start..new_pkt_start + ETH_HDR_LEN];
+        let eth_src = &pkt_back[..extra_hdr];
+        let eth_dst: &mut [u8] = &mut pkt_front[new_pkt_start..new_pkt_start + extra_hdr];
         invert_eth_header(eth_src, eth_dst);
-        new_pkt_start + ETH_HDR_LEN
+        new_pkt_start + extra_hdr
     } else {
         new_pkt_start
     };
@@ -157,12 +146,12 @@ fn populate_ipv6_packet_too_big(
     // Re-split buffer
     let ipv6_buf = &mut buf[new_ip_start..];
 
-    let icmpv6_payload_len = (pkt_len - ETH_HDR_LEN).min(1232);
+    let icmpv6_payload_len = ip_len.min(1232);
     let ipv6_payload_len = ICMPV6_PACKET_TOO_BIG_WITH_MTU_LEN + icmpv6_payload_len;
 
     // Copy up to 1232 bytes of the original packet as payload
     let icmpv6_buf = &mut ipv6_buf[IPV6_HDR_LEN..];
-    (&mut icmpv6_buf[4..8]).copy_from_slice(&((outer_mtu - ETH_HDR_LEN) as u32).to_be_bytes());
+    (&mut icmpv6_buf[4..8]).copy_from_slice(&(inner_mtu as u32).to_be_bytes());
     let mut icmpv6 = MutableIcmpv6Packet::new(icmpv6_buf).expect("Buffer too short for icmpv6");
     icmpv6.set_icmpv6_type(Icmpv6Types::PacketTooBig);
     icmpv6.set_icmpv6_code(Icmpv6Code(0));
@@ -191,11 +180,7 @@ fn populate_ipv6_packet_too_big(
     ipv6.set_next_header(pnet_packet::ip::IpNextHeaderProtocols::Icmpv6);
     ipv6.set_payload_length(ipv6_payload_len as u16);
 
-    let pkg_total_len = if includes_eth {
-        ETH_HDR_LEN + IPV6_HDR_LEN + ipv6_payload_len
-    } else {
-        IPV6_HDR_LEN + ipv6_payload_len
-    };
+    let pkg_total_len = IPV6_HDR_LEN + ipv6_payload_len + eth_extra_hdr.unwrap_or(0);
 
     Ok(Some(&buf[new_pkt_start..new_pkt_start + pkg_total_len]))
 }
@@ -205,14 +190,15 @@ pub fn populate_packet_too_big(
     buf: &mut [u8],
     pkt_start: usize,
     pkt_len: usize,
-    includes_eth: bool,
+    eth_extra_hdr: Option<usize>,
 ) -> anyhow::Result<Option<&[u8]>> {
-    match buf.get(pkt_start + ETH_HDR_LEN) {
+    let extra_hdr = eth_extra_hdr.unwrap_or(0);
+    match buf.get(pkt_start + extra_hdr) {
         Some(b) if (b >> 4) == 4 => {
-            populate_ipv4_packet_too_big(outer_mtu, buf, pkt_start, pkt_len, includes_eth)
+            populate_ipv4_packet_too_big(outer_mtu, buf, pkt_start, pkt_len, eth_extra_hdr)
         }
         Some(b) if (b >> 4) == 6 => {
-            populate_ipv6_packet_too_big(outer_mtu, buf, pkt_start, pkt_len, includes_eth)
+            populate_ipv6_packet_too_big(outer_mtu, buf, pkt_start, pkt_len, eth_extra_hdr)
         }
         _ => Ok(None),
     }

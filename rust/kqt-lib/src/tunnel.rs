@@ -4,13 +4,13 @@ use quinn::{
     crypto::rustls::{QuicClientConfig, QuicServerConfig},
     rustls::{self, version::TLS13},
 };
-use std::{borrow::Cow, net::SocketAddr, sync::Arc, time::Duration};
+use std::{borrow::Cow, sync::Arc, time::Duration};
 use tun_rs::DeviceBuilder;
 
 use crate::{
-    config::{Config, Mode},
+    config::{Config, ConnectTo, Mode},
     crypto::{LiteCertVerifier, ParsedKeypair, ParsedTrustAnchor},
-    packet::{ETH_HDR_LEN, clamp_mss, ip_has_more_frag, ip_is_v4, populate_packet_too_big},
+    packet::{clamp_mss, ip_has_more_frag, ip_is_v4, populate_packet_too_big},
     peers::Mappable,
     *,
 };
@@ -20,6 +20,7 @@ use crate::{
 };
 
 const KQT_PROTO_VERSION: &'static [u8] = b"kqt/0.1";
+const ETH_HDR_LEN: usize = 14;
 
 impl Mode {
     fn extra_hdr(&self) -> usize {
@@ -29,19 +30,17 @@ impl Mode {
         }
     }
 
-    fn includes_eth(&self) -> bool {
+    fn eth_extra_hdr(&self) -> Option<usize> {
         match self {
-            Mode::L2 => true,
-            Mode::L3 => false,
+            Mode::L2 => Some(ETH_HDR_LEN),
+            Mode::L3 => None,
         }
     }
 
     fn parse_send_target(&self, data: &[u8]) -> Option<peers::SendTarget> {
         match self {
             Mode::L2 => {
-                let mac: [u8; 6] = data
-                    .get(0..6)?
-                    .try_into().unwrap();
+                let mac: [u8; 6] = data.get(0..6)?.try_into().unwrap();
                 if mac == [0xff; 6] {
                     Some(peers::SendTarget::Broadcast)
                 } else {
@@ -52,9 +51,17 @@ impl Mode {
                 // Detect IP version
                 if ip_is_v4(data) {
                     let addr: [u8; 4] = data.get(16..20)?.try_into().unwrap();
+                    // Check multicast
+                    if addr[0] & 0xf0 == 0xe0 {
+                        return Some(peers::SendTarget::Broadcast);
+                    }
                     Some(peers::SendTarget::UnicastIP(addr.into()))
-                } else  {
+                } else {
                     let addr: [u8; 16] = data.get(24..40)?.try_into().unwrap();
+                    // Check multicast
+                    if addr[0] == 0xff {
+                        return Some(peers::SendTarget::Broadcast);
+                    }
                     Some(peers::SendTarget::UnicastIP(addr.into()))
                 }
             }
@@ -217,7 +224,7 @@ pub async fn run(iface: IfaceSetup, cfg: crate::config::Config) -> anyhow::Resul
         tokio::spawn(handle_target(
             endpoint.clone(),
             device.clone(),
-            conn_cfg.endpoint,
+            conn_cfg,
             store.clone(),
             cfg.mode,
         ));
@@ -225,7 +232,12 @@ pub async fn run(iface: IfaceSetup, cfg: crate::config::Config) -> anyhow::Resul
 
     // Handle server
     if cfg.listen.is_some() {
-        tokio::spawn(handle_server(endpoint, device.clone(), store.clone(), cfg.mode));
+        tokio::spawn(handle_server(
+            endpoint,
+            device.clone(),
+            store.clone(),
+            cfg.mode,
+        ));
     }
 
     // Main loop
@@ -236,7 +248,10 @@ pub async fn run(iface: IfaceSetup, cfg: crate::config::Config) -> anyhow::Resul
         let buf_start = buf.as_ptr();
         let len: usize = device.recv(&mut buf[FRONT_BUFFER..]).await?;
 
-        let Some(target) = cfg.mode.parse_send_target(&buf[FRONT_BUFFER..FRONT_BUFFER + len]) else {
+        let Some(target) = cfg
+            .mode
+            .parse_send_target(&buf[FRONT_BUFFER..FRONT_BUFFER + len])
+        else {
             tracing::debug!("Unable to parse route target, dropping packet");
             continue 'pkt;
         };
@@ -271,25 +286,26 @@ pub async fn run(iface: IfaceSetup, cfg: crate::config::Config) -> anyhow::Resul
             tracing::warn!("Error sending datagram: {:?}", e);
             // Check error, and if applicable, frag
             if let peers::SendError::PacketTooBig { mtu } = e {
-                if mtu >= active_len {
+                if mtu >= sending_len {
                     // Retry
                     // TODO: bound retry iterations?
                     continue;
                 }
 
-                if ip_can_frag(&sending[ETH_HDR_LEN..]) {
+                if ip_can_frag(&sending[cfg.mode.extra_hdr()..]) {
                     frag = Some(mtu);
                     continue;
                 }
 
+                tracing::debug!("Generating packet too big");
                 let pkt_start = sending.as_ptr() as usize - buf_start as usize;
                 let pkt_len = sending_len;
                 if let Some(pkt) = populate_packet_too_big(
-                    mtu,
+                    mtu - cfg.mode.extra_hdr(),
                     &mut buf,
                     pkt_start,
                     pkt_len,
-                    cfg.mode.includes_eth(),
+                    cfg.mode.eth_extra_hdr(),
                 )? {
                     device.send(pkt).await?;
                 }
@@ -306,17 +322,17 @@ pub async fn run(iface: IfaceSetup, cfg: crate::config::Config) -> anyhow::Resul
 async fn handle_target(
     ep: Endpoint,
     device: Arc<tun_rs::AsyncDevice>,
-    addr: SocketAddr,
+    cfg: ConnectTo,
     store: Peers,
     mode: Mode,
 ) -> ! {
     loop {
         let Err(err): anyhow::Result<!> = try {
             // We don't actually use server_name. Use a dummy IPv4 here.
-            let conn = ep.connect(addr, "0.0.0.0").map_err(Into::into)?;
-            handle_connection(conn, device.clone(), store.clone(), mode).await?
+            let conn = ep.connect(cfg.endpoint, "0.0.0.0").map_err(Into::into)?;
+            handle_connection(conn, device.clone(), Some(&cfg), store.clone(), mode).await?
         };
-        tracing::error!("Outgoing connection to {} closed: {}", addr, err);
+        tracing::error!("Outgoing connection to {} closed: {}", cfg.endpoint, err);
         match err.downcast::<quinn::ConnectionError>() {
             Ok(quinn::ConnectionError::TimedOut) => {
                 // Immediately retry on timeout
@@ -337,6 +353,7 @@ async fn handle_target(
 async fn handle_connection(
     conn: Connecting,
     device: Arc<tun_rs::AsyncDevice>,
+    cfg: Option<&ConnectTo>,
     store: Peers,
     mode: Mode,
 ) -> anyhow::Result<!> {
@@ -345,6 +362,13 @@ async fn handle_connection(
     let addr = conn.remote_address();
     tracing::info!("New connection from {}, max dgram size {:?}", addr, mds);
     store.attach_conn(conn.clone()).await;
+
+    if let Some(cfg) = cfg {
+        // Register designated IPs
+        for range in cfg.designated_range.iter() {
+            store.map(Mappable::IpInet(*range), &conn).await;
+        }
+    }
 
     let ret: anyhow::Result<!> = try {
         loop {
@@ -401,7 +425,7 @@ async fn handle_server(
         let device_clone = device.clone();
         let store_clone = store.clone();
         tokio::spawn(async move {
-            let Err(e) = handle_connection(conn, device_clone, store_clone, mode).await;
+            let Err(e) = handle_connection(conn, device_clone, None, store_clone, mode).await;
             tracing::error!("Incoming connection from {} closed: {}", from, e);
         });
     }

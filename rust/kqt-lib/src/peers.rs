@@ -1,11 +1,6 @@
 use cidr::{IpInet, Ipv4Inet, Ipv6Inet};
 use ed25519_dalek::VerifyingKey;
-use std::{
-    collections::BTreeMap,
-    hash::Hash,
-    net::IpAddr,
-    sync::Arc,
-};
+use std::{collections::BTreeMap, hash::Hash, net::IpAddr, sync::Arc};
 use thiserror::Error;
 use tokio::sync::RwLock;
 
@@ -164,8 +159,10 @@ const fn const_unwrap<T, E>(r: Result<T, E>) -> T {
         Err(_e) => panic!("Const unwrap failed"),
     }
 }
-const MINIMAL_IPV4_INET: Ipv4Inet = const_unwrap(Ipv4Inet::new(std::net::Ipv4Addr::from([0; 4]), 0));
-const MINIMAL_IPV6_INET: Ipv6Inet = const_unwrap(Ipv6Inet::new(std::net::Ipv6Addr::from([0; 16]), 0));
+const MINIMAL_IPV4_INET: Ipv4Inet =
+    const_unwrap(Ipv4Inet::new(std::net::Ipv4Addr::from([0; 4]), 0));
+const MINIMAL_IPV6_INET: Ipv6Inet =
+    const_unwrap(Ipv6Inet::new(std::net::Ipv6Addr::from([0; 16]), 0));
 
 enum LookupResult<'k> {
     Broadcast,
@@ -187,20 +184,23 @@ impl PeersInner {
     fn lookup(&self, t: &SendTarget) -> LookupResult<'_> {
         tracing::debug!("Lookup target: {:?}", t);
         match t {
-            SendTarget::UnicastMAC(mac) => if let Some(r) = self.mappings.get(&Mappable::MAC(*mac)) {
-                LookupResult::Unicast(r)
-            } else {
-                // Broadcast on MAC
-                LookupResult::Broadcast
+            SendTarget::UnicastMAC(mac) => {
+                if let Some(r) = self.mappings.get(&Mappable::MAC(*mac)) {
+                    LookupResult::Unicast(r)
+                } else {
+                    // Broadcast on MAC
+                    LookupResult::Broadcast
+                }
             }
             SendTarget::UnicastIP(ip) => {
                 let mut lookup = None;
                 match ip {
                     IpAddr::V4(v4) => {
                         let mut route = self.mappings.upper_bound(std::ops::Bound::Excluded(
-                            &Mappable::IpInet(MINIMAL_IPV4_INET.into())
+                            &Mappable::IpInet(MINIMAL_IPV4_INET.into()),
                         ));
                         while let Some((&Mappable::IpInet(IpInet::V4(r)), t)) = route.next() {
+                            tracing::debug!("Checking route {:?} for {:?}", r, v4);
                             if r.contains(&v4) {
                                 lookup = Some(t);
                             }
@@ -208,9 +208,10 @@ impl PeersInner {
                     }
                     IpAddr::V6(v6) => {
                         let mut route = self.mappings.upper_bound(std::ops::Bound::Excluded(
-                            &Mappable::IpInet(MINIMAL_IPV6_INET.into())
+                            &Mappable::IpInet(MINIMAL_IPV6_INET.into()),
                         ));
                         while let Some((&Mappable::IpInet(IpInet::V6(r)), t)) = route.next() {
+                            tracing::debug!("Checking route {:?} for {:?}", r, v6);
                             if r.contains(&v6) {
                                 lookup = Some(t);
                             }
@@ -225,7 +226,7 @@ impl PeersInner {
 
     fn route(&self, to: &VerifyingKey) -> Option<&Neighboor> {
         match &self.router {
-            Router::DirectOnly => self.neighboors.iter().find(|r| &r.identity == to)
+            Router::DirectOnly => self.neighboors.iter().find(|r| &r.identity == to),
         }
     }
 }
@@ -263,11 +264,7 @@ impl Peers {
         // Don't close it ourself, close it outside
         let identity = get_remote_identity(conn);
         let mut inner = self.0.write().await;
-        let Some(remote) = inner
-            .neighboors
-            .iter_mut()
-            .find(|r| r.identity == identity)
-        else {
+        let Some(remote) = inner.neighboors.iter_mut().find(|r| r.identity == identity) else {
             return;
         };
 
@@ -283,7 +280,11 @@ impl Peers {
             return;
         }
 
-        tracing::debug!("Linking {:?} to remote {}", r, hex::encode(identity.as_bytes()));
+        tracing::debug!(
+            "Linking {:?} to remote {}",
+            r,
+            hex::encode(identity.as_bytes())
+        );
 
         drop(inner);
 
