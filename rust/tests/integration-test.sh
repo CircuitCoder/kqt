@@ -197,23 +197,30 @@ echo -e "${YELLOW}Step 6: Running IPv4 ping tests...${NC}"
 echo "Test 6a: Ping with default packet size"
 PING_OUTPUT=$(sudo ip netns exec "$NS1" ping -c 4 -W 5 10.21.0.2 2>&1)
 echo "$PING_OUTPUT"
-if echo "$PING_OUTPUT" | grep -q "bytes of data"; then
-    echo -e "${GREEN}✓ Default ping successful${NC}"
-else
-    echo -e "${RED}✗ Default ping failed${NC}"
-    echo "Checking node logs for errors..."
-    if grep -q "Operation not permitted" "$WORK_DIR/node1.log" "$WORK_DIR/node2.log" 2>/dev/null; then
-        echo -e "${YELLOW}⚠ UDP socket operations are being denied with 'Operation not permitted'${NC}"
-        echo -e "${YELLOW}  This is a known limitation in some sandbox environments.${NC}"
-        echo -e "${YELLOW}  The integration test cannot proceed further in this environment.${NC}"
-        echo ""
-        echo "Node1 log:"
-        cat "$WORK_DIR/node1.log"
-        echo ""
-        echo "Node2 log:"
-        cat "$WORK_DIR/node2.log"
-        exit 0  # Exit with success since we've verified what we can
+# Check if ping ran and got any responses
+if echo "$PING_OUTPUT" | grep -q " received"; then
+    RECEIVED=$(echo "$PING_OUTPUT" | grep "packets transmitted" | awk '{print $4}')
+    if [ "$RECEIVED" != "0" ]; then
+        echo -e "${GREEN}✓ Default ping successful${NC}"
+    else
+        echo -e "${RED}✗ Default ping failed (no packets received)${NC}"
+        echo "Checking node logs for errors..."
+        if grep -q "Operation not permitted" "$WORK_DIR/node1.log" "$WORK_DIR/node2.log" 2>/dev/null; then
+            echo -e "${YELLOW}⚠ UDP socket operations are being denied with 'Operation not permitted'${NC}"
+            echo -e "${YELLOW}  This is a known limitation in some sandbox environments.${NC}"
+            echo -e "${YELLOW}  The integration test cannot proceed further in this environment.${NC}"
+            echo ""
+            echo "Node1 log:"
+            cat "$WORK_DIR/node1.log"
+            echo ""
+            echo "Node2 log:"
+            cat "$WORK_DIR/node2.log"
+            exit 0  # Exit with success since we've verified what we can
+        fi
+        exit 1
     fi
+else
+    echo -e "${RED}✗ Default ping failed (no statistics)${NC}"
     exit 1
 fi
 
@@ -222,27 +229,21 @@ echo "Test 6b: Ping with large packets (PMTU discovery enabled)"
 # Use -s 5000 to send packets larger than 2*MTU, with PMTU discovery
 PING_OUTPUT=$(sudo ip netns exec "$NS1" ping -c 4 -W 5 -s 5000 10.21.0.2 2>&1)
 echo "$PING_OUTPUT"
-# Check for ping output with data size (format: "5000(5028) bytes of data" or "5000 bytes of data")
-if echo "$PING_OUTPUT" | grep -qE "5000(\([0-9]+\))? bytes of data"; then
-    # Check if we got any responses (the first ping may fail, but later ones should succeed)
-    if echo "$PING_OUTPUT" | grep -q " received"; then
-        RECEIVED=$(echo "$PING_OUTPUT" | grep "packets transmitted" | awk '{print $4}')
-        if [ "$RECEIVED" != "0" ]; then
-            echo -e "${GREEN}✓ Large ping with PMTU discovery successful (some packets received after MTU discovery)${NC}"
-            # The first ping failing is expected and wanted for PMTU discovery
-            if echo "$PING_OUTPUT" | grep -q "Frag needed\|Message too long"; then
-                echo -e "${GREEN}  First ping failed as expected (PMTU discovery in action)${NC}"
-            fi
-        else
-            echo -e "${RED}✗ Large ping with PMTU discovery failed (no packets received)${NC}"
-            exit 1
+# Check if we got any responses (the first ping may fail, but later ones should succeed)
+if echo "$PING_OUTPUT" | grep -q " received"; then
+    RECEIVED=$(echo "$PING_OUTPUT" | grep "packets transmitted" | awk '{print $4}')
+    if [ "$RECEIVED" != "0" ]; then
+        echo -e "${GREEN}✓ Large ping with PMTU discovery successful (some packets received after MTU discovery)${NC}"
+        # The first ping failing is expected and wanted for PMTU discovery
+        if echo "$PING_OUTPUT" | grep -q "Frag needed\|Message too long"; then
+            echo -e "${GREEN}  First ping failed as expected (PMTU discovery in action)${NC}"
         fi
     else
-        echo -e "${RED}✗ Large ping with PMTU discovery failed (no statistics)${NC}"
+        echo -e "${RED}✗ Large ping with PMTU discovery failed (no packets received)${NC}"
         exit 1
     fi
 else
-    echo -e "${RED}✗ Large ping with PMTU discovery failed${NC}"
+    echo -e "${RED}✗ Large ping with PMTU discovery failed (no statistics)${NC}"
     exit 1
 fi
 
@@ -251,10 +252,17 @@ echo "Test 6c: Ping with large packets (fragmentation prohibited)"
 # Use -M do to prohibit fragmentation
 PING_OUTPUT=$(sudo ip netns exec "$NS1" ping -c 4 -W 5 -s 5000 -M do 10.21.0.2 2>&1)
 echo "$PING_OUTPUT"
-if echo "$PING_OUTPUT" | grep -q "5000 bytes of data"; then
-    echo -e "${GREEN}✓ Large ping with fragmentation prohibited successful${NC}"
+# Check if we got any responses
+if echo "$PING_OUTPUT" | grep -q " received"; then
+    RECEIVED=$(echo "$PING_OUTPUT" | grep "packets transmitted" | awk '{print $4}')
+    if [ "$RECEIVED" != "0" ]; then
+        echo -e "${GREEN}✓ Large ping with fragmentation prohibited successful${NC}"
+    else
+        # This might fail if MTU is too small, which is expected behavior
+        echo -e "${YELLOW}⚠ Large ping with fragmentation prohibited may have failed (expected if MTU < packet size)${NC}"
+    fi
 else
-    # This might fail if MTU is too small, which is expected behavior
+    # No statistics means ping failed completely
     echo -e "${YELLOW}⚠ Large ping with fragmentation prohibited may have failed (expected if MTU < packet size)${NC}"
 fi
 echo ""
@@ -266,10 +274,17 @@ echo -e "${YELLOW}Step 7: Running IPv6 ping tests...${NC}"
 echo "Test 7a: IPv6 ping with default packet size"
 PING6_OUTPUT=$(sudo ip netns exec "$NS1" ping6 -c 4 -W 5 fd00::2 2>&1)
 echo "$PING6_OUTPUT"
-if echo "$PING6_OUTPUT" | grep -q "data bytes"; then
-    echo -e "${GREEN}✓ IPv6 default ping successful${NC}"
+# Check if ping ran and got any responses
+if echo "$PING6_OUTPUT" | grep -q " received"; then
+    RECEIVED=$(echo "$PING6_OUTPUT" | grep "packets transmitted" | awk '{print $4}')
+    if [ "$RECEIVED" != "0" ]; then
+        echo -e "${GREEN}✓ IPv6 default ping successful${NC}"
+    else
+        echo -e "${RED}✗ IPv6 default ping failed (no packets received)${NC}"
+        exit 1
+    fi
 else
-    echo -e "${RED}✗ IPv6 default ping failed${NC}"
+    echo -e "${RED}✗ IPv6 default ping failed (no statistics)${NC}"
     exit 1
 fi
 
@@ -277,27 +292,21 @@ fi
 echo "Test 7b: IPv6 ping with large packets (PMTU discovery enabled)"
 PING6_OUTPUT=$(sudo ip netns exec "$NS1" ping6 -c 4 -W 5 -s 5000 fd00::2 2>&1)
 echo "$PING6_OUTPUT"
-# Check for ping6 output with data size
-if echo "$PING6_OUTPUT" | grep -q "5000 data bytes"; then
-    # Check if we got any responses (the first ping may fail, but later ones should succeed)
-    if echo "$PING6_OUTPUT" | grep -q " received"; then
-        RECEIVED=$(echo "$PING6_OUTPUT" | grep "packets transmitted" | awk '{print $4}')
-        if [ "$RECEIVED" != "0" ]; then
-            echo -e "${GREEN}✓ IPv6 large ping with PMTU discovery successful (some packets received after MTU discovery)${NC}"
-            # The first ping failing is expected and wanted for PMTU discovery
-            if echo "$PING6_OUTPUT" | grep -q "Packet too big\|too big"; then
-                echo -e "${GREEN}  First ping failed as expected (PMTU discovery in action)${NC}"
-            fi
-        else
-            echo -e "${RED}✗ IPv6 large ping with PMTU discovery failed (no packets received)${NC}"
-            exit 1
+# Check if we got any responses (the first ping may fail, but later ones should succeed)
+if echo "$PING6_OUTPUT" | grep -q " received"; then
+    RECEIVED=$(echo "$PING6_OUTPUT" | grep "packets transmitted" | awk '{print $4}')
+    if [ "$RECEIVED" != "0" ]; then
+        echo -e "${GREEN}✓ IPv6 large ping with PMTU discovery successful (some packets received after MTU discovery)${NC}"
+        # The first ping failing is expected and wanted for PMTU discovery
+        if echo "$PING6_OUTPUT" | grep -q "Packet too big\|too big"; then
+            echo -e "${GREEN}  First ping failed as expected (PMTU discovery in action)${NC}"
         fi
     else
-        echo -e "${RED}✗ IPv6 large ping with PMTU discovery failed (no statistics)${NC}"
+        echo -e "${RED}✗ IPv6 large ping with PMTU discovery failed (no packets received)${NC}"
         exit 1
     fi
 else
-    echo -e "${RED}✗ IPv6 large ping with PMTU discovery failed${NC}"
+    echo -e "${RED}✗ IPv6 large ping with PMTU discovery failed (no statistics)${NC}"
     exit 1
 fi
 echo ""
