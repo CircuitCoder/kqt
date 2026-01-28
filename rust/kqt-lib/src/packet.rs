@@ -141,7 +141,7 @@ fn populate_ipv6_packet_too_big(
 
     // Compute ICMPv6 checksum
     let checksum = pnet_packet::util::ipv6_checksum(
-        &icmpv6.packet()[..icmpv6_payload_len],
+        &icmpv6.packet()[..ipv6_payload_len],
         1,
         &[],
         &ipv6_src,
