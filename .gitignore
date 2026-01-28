@@ -1,3 +1,4 @@
 /.vscode
 /.ccls-cache
 compile_commands.json
+/tests/run
