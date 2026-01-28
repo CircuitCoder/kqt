@@ -38,9 +38,9 @@ If you encounter these limitations, you can still verify the build and basic fun
    # From the rust directory
    cd tests
    
-   # Generate keys and configs (L2 mode by default)
+   # Generate keys and configs (L2 mode is the default)
    bash generate-keys.sh run
-   bash generate-configs.sh run L2
+   bash generate-configs.sh run
    
    # Or for L3 mode
    bash generate-configs.sh run L3
