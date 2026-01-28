@@ -222,14 +222,15 @@ echo "Test 6b: Ping with large packets (PMTU discovery enabled)"
 # Use -s 5000 to send packets larger than 2*MTU, with PMTU discovery
 PING_OUTPUT=$(sudo ip netns exec "$NS1" ping -c 4 -W 5 -s 5000 10.21.0.2 2>&1)
 echo "$PING_OUTPUT"
-if echo "$PING_OUTPUT" | grep -q "5000 bytes of data"; then
+# Check for ping output with data size (format: "5000(5028) bytes of data" or "5000 bytes of data")
+if echo "$PING_OUTPUT" | grep -qE "5000(\([0-9]+\))? bytes of data"; then
     # Check if we got any responses (the first ping may fail, but later ones should succeed)
     if echo "$PING_OUTPUT" | grep -q " received"; then
         RECEIVED=$(echo "$PING_OUTPUT" | grep "packets transmitted" | awk '{print $4}')
         if [ "$RECEIVED" != "0" ]; then
             echo -e "${GREEN}✓ Large ping with PMTU discovery successful (some packets received after MTU discovery)${NC}"
             # The first ping failing is expected and wanted for PMTU discovery
-            if echo "$PING_OUTPUT" | grep -q "Network is unreachable\|Message too long\|Frag needed"; then
+            if echo "$PING_OUTPUT" | grep -q "Frag needed\|Message too long"; then
                 echo -e "${GREEN}  First ping failed as expected (PMTU discovery in action)${NC}"
             fi
         else
@@ -276,6 +277,7 @@ fi
 echo "Test 7b: IPv6 ping with large packets (PMTU discovery enabled)"
 PING6_OUTPUT=$(sudo ip netns exec "$NS1" ping6 -c 4 -W 5 -s 5000 fd00::2 2>&1)
 echo "$PING6_OUTPUT"
+# Check for ping6 output with data size
 if echo "$PING6_OUTPUT" | grep -q "5000 data bytes"; then
     # Check if we got any responses (the first ping may fail, but later ones should succeed)
     if echo "$PING6_OUTPUT" | grep -q " received"; then
@@ -283,7 +285,7 @@ if echo "$PING6_OUTPUT" | grep -q "5000 data bytes"; then
         if [ "$RECEIVED" != "0" ]; then
             echo -e "${GREEN}✓ IPv6 large ping with PMTU discovery successful (some packets received after MTU discovery)${NC}"
             # The first ping failing is expected and wanted for PMTU discovery
-            if echo "$PING6_OUTPUT" | grep -q "Packet too big\|Message too long"; then
+            if echo "$PING6_OUTPUT" | grep -q "Packet too big\|too big"; then
                 echo -e "${GREEN}  First ping failed as expected (PMTU discovery in action)${NC}"
             fi
         else
