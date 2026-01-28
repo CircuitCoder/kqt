@@ -5,7 +5,6 @@ use quinn::{
     rustls::{self, version::TLS13},
 };
 use std::{borrow::Cow, sync::Arc, time::Duration};
-use tun_rs::DeviceBuilder;
 
 use crate::{
     config::{Config, ConnectTo, Mode},
@@ -79,11 +78,27 @@ impl Mode {
 }
 
 pub enum IfaceSetup {
+    #[cfg(any(
+        target_os = "windows",
+        all(target_os = "linux", not(target_env = "ohos")),
+        target_os = "macos",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+    ))]
     Create(String),
     #[cfg(any(unix))]
-    Fd(std::os::fd::RawFd),
+    Fd { fd: std::os::fd::RawFd, mtu: u16 },
 }
 
+#[cfg(any(
+    target_os = "windows",
+    all(target_os = "linux", not(target_env = "ohos")),
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+))]
 impl Mode {
     fn to_tun_layer(self) -> tun_rs::Layer {
         match self {
@@ -94,32 +109,52 @@ impl Mode {
 }
 
 impl Config {
-    fn build_device(&self, iface: IfaceSetup) -> anyhow::Result<Arc<tun_rs::AsyncDevice>> {
+    fn build_device(&self, iface: &IfaceSetup) -> anyhow::Result<Arc<tun_rs::AsyncDevice>> {
         let device = match iface {
-            IfaceSetup::Create(ref name) => DeviceBuilder::new()
+            #[cfg(any(
+                target_os = "windows",
+                all(target_os = "linux", not(target_env = "ohos")),
+                target_os = "macos",
+                target_os = "freebsd",
+                target_os = "openbsd",
+                target_os = "netbsd",
+            ))]
+            IfaceSetup::Create(name) => tun_rs::DeviceBuilder::new()
                 .name(name)
                 .layer(self.mode.to_tun_layer())
                 .build_async()?,
             #[cfg(any(unix))]
-            IfaceSetup::Fd(fd) => unsafe { tun_rs::AsyncDevice::from_fd(fd)? },
+            IfaceSetup::Fd { fd, .. } => unsafe { tun_rs::AsyncDevice::from_fd(*fd)? },
         };
 
-        if let Some(mtu) = self.mtu {
-            device.set_mtu(mtu)?;
-        }
-        for addr in self.address.iter() {
-            match addr {
-                cidr::IpInet::V4(cidr) => {
-                    device.add_address_v4(cidr.address(), cidr.network_length())?
-                }
-                cidr::IpInet::V6(cidr) => {
-                    device.add_address_v6(cidr.address(), cidr.network_length())?
+        #[cfg(not(target_os = "android"))]
+        {
+            if let Some(mtu) = self.mtu {
+                device.set_mtu(mtu)?;
+            }
+            for addr in self.address.iter() {
+                match addr {
+                    cidr::IpInet::V4(cidr) => {
+                        device.add_address_v4(cidr.address(), cidr.network_length())?
+                    }
+                    cidr::IpInet::V6(cidr) => {
+                        device.add_address_v6(cidr.address(), cidr.network_length())?
+                    }
                 }
             }
         }
         Ok(Arc::new(device))
     }
 
+    #[cfg(not(feature = "route"))]
+    async fn apply_routes(&self, _device: Arc<tun_rs::AsyncDevice>) -> anyhow::Result<()> {
+        if self.routes.len() > 0 {
+            tracing::warn!("Route feature not enabled, ignoring configured routes.");
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "route")]
     async fn apply_routes(&self, device: Arc<tun_rs::AsyncDevice>) -> anyhow::Result<()> {
         if self.routes.len() > 0 {
             let ifindex = device.if_index()?;
@@ -222,7 +257,7 @@ pub async fn run(iface: IfaceSetup, cfg: crate::config::Config) -> anyhow::Resul
 
     tracing::debug!("Endpoints created");
 
-    let device = cfg.build_device(iface)?;
+    let device = cfg.build_device(&iface)?;
     tracing::debug!("Device created");
     cfg.apply_routes(device.clone()).await?;
 
@@ -252,7 +287,18 @@ pub async fn run(iface: IfaceSetup, cfg: crate::config::Config) -> anyhow::Resul
     // Main loop
     let mut buf = Vec::new();
     'pkt: loop {
-        let mtu = device.mtu()?;
+        let mtu;
+        #[cfg(not(target_os = "android"))]
+        {
+            mtu = device.mtu()?;
+        }
+        #[cfg(target_os = "android")]
+        {
+            let IfaceSetup::Fd {
+                mtu: ref init_mtu, ..
+            } = iface;
+            mtu = *init_mtu;
+        }
         buf.resize(mtu as usize + ETH_HDR_LEN + FRONT_BUFFER, 0);
         let buf_start = buf.as_ptr();
         let len: usize = device.recv(&mut buf[FRONT_BUFFER..]).await?;

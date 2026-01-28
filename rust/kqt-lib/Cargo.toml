@@ -4,6 +4,9 @@ description = "Rust userspace implementation for kqt"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+route = ["dep:net-route"]
+
 [dependencies]
 anyhow = "1.0.98"
 base64 = "0.22.1"
@@ -22,4 +25,4 @@ thiserror = "2.0.17"
 cidr = { version = "0.3.1", features = ["serde"] }
 ring = "*"
 pnet_packet = "0.35.0"
-net-route = "0.4.6"
+net-route = { version = "0.4.6", optional = true }
