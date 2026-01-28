@@ -8,6 +8,7 @@ OUTPUT_DIR="${1:-.}"
 SUFFIX="test.local"
 NODE1_LISTEN_PORT="${NODE1_LISTEN_PORT:-9001}"
 NODE2_LISTEN_PORT="${NODE2_LISTEN_PORT:-9002}"
+KQT_BIN="${KQT_BIN:-$(dirname "$0")/../rust/target/release/kqt}"
 
 # Ensure keys exist
 if [ ! -f "$OUTPUT_DIR/ca.pem" ] || [ ! -f "$OUTPUT_DIR/node1-private.key" ] || [ ! -f "$OUTPUT_DIR/node2-private.key" ]; then
@@ -16,7 +17,7 @@ if [ ! -f "$OUTPUT_DIR/ca.pem" ] || [ ! -f "$OUTPUT_DIR/node1-private.key" ] || 
 fi
 
 # Read keys
-CA_PEM=$(cat "$OUTPUT_DIR/ca.pem")
+CA_PUBLIC=$(cat "$OUTPUT_DIR/ca-private.key" | "$KQT_BIN" keygen public --format string --suffix "$SUFFIX")
 NODE1_PRIVATE=$(cat "$OUTPUT_DIR/node1-private.key")
 NODE2_PRIVATE=$(cat "$OUTPUT_DIR/node2-private.key")
 
@@ -24,8 +25,7 @@ echo "Generating node1 configuration..."
 cat > "$OUTPUT_DIR/node1.toml" <<EOF
 # Node 1 Configuration
 keypair = "$NODE1_PRIVATE"
-anchor = ["""
-$CA_PEM"""]
+anchor = ["$CA_PUBLIC"]
 suffix = "$SUFFIX"
 mtu = 1400
 
@@ -46,8 +46,7 @@ echo "Generating node2 configuration..."
 cat > "$OUTPUT_DIR/node2.toml" <<EOF
 # Node 2 Configuration
 keypair = "$NODE2_PRIVATE"
-anchor = ["""
-$CA_PEM"""]
+anchor = ["$CA_PUBLIC"]
 suffix = "$SUFFIX"
 mtu = 1400
 

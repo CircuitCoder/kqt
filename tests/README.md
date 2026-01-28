@@ -14,6 +14,16 @@ This directory contains integration tests for the kqt project.
 - `sudo` access for creating network namespaces
 - Rust nightly toolchain (nightly-2026-01-18 or compatible)
 - `ip` command from iproute2
+- **Important**: Full network namespace support with UDP socket permissions (may not work in restricted container/sandbox environments)
+
+## Known Limitations
+
+The integration tests require full network namespace support including the ability to send UDP packets with socket options like ECN (Explicit Congestion Notification). Some container or sandbox environments may block these operations with "Operation not permitted" errors. In such cases:
+- The TUN device creation will succeed
+- The nodes will start and listen on their ports
+- But UDP packet transmission will fail with permission errors
+
+If you encounter these limitations, you can still verify the build and basic functionality, but full integration tests will need to run on a system with unrestricted network namespace support.
 
 ## Running Tests Locally
 
