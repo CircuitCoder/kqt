@@ -194,7 +194,10 @@ impl CancellationToken {
         self.0.cancel();
     }
 
-    pub fn spawn<R: Send + Sync + 'static>(&self, fut: impl std::future::Future<Output = R> + Send + 'static) -> tokio::task::JoinHandle<Option<R>> {
+    pub fn spawn<R: Send + Sync + 'static>(
+        &self,
+        fut: impl std::future::Future<Output = R> + Send + 'static,
+    ) -> tokio::task::JoinHandle<Option<R>> {
         let child_token = self.0.clone();
         tokio::spawn(async move {
             tokio::select! {
@@ -205,7 +208,11 @@ impl CancellationToken {
     }
 }
 
-pub async fn run(iface: IfaceSetup, cfg: crate::config::Config, cancel: CancellationToken) -> anyhow::Result<()> {
+pub async fn run(
+    iface: IfaceSetup,
+    cfg: crate::config::Config,
+    cancel: CancellationToken,
+) -> anyhow::Result<()> {
     // Create Trust Ancrhos & verifier
     let trusts = cfg
         .anchor
@@ -307,11 +314,18 @@ pub async fn run(iface: IfaceSetup, cfg: crate::config::Config, cancel: Cancella
         ));
     }
 
-    cancel.spawn(main_loop(device, cfg.mode, store, iface)).await?;
+    cancel
+        .spawn(main_loop(device, cfg.mode, store, iface))
+        .await?;
     Ok(())
 }
 
-async fn main_loop(device: Arc<tun_rs::AsyncDevice>, mode: Mode, store: Peers, _iface: IfaceSetup) -> anyhow::Result<()> {
+async fn main_loop(
+    device: Arc<tun_rs::AsyncDevice>,
+    mode: Mode,
+    store: Peers,
+    _iface: IfaceSetup,
+) -> anyhow::Result<()> {
     // Main loop
     let mut buf = Vec::new();
     'pkt: loop {
@@ -331,8 +345,7 @@ async fn main_loop(device: Arc<tun_rs::AsyncDevice>, mode: Mode, store: Peers, _
         let buf_start = buf.as_ptr() as usize;
         let len: usize = device.recv(&mut buf[FRONT_BUFFER..]).await?;
 
-        let Some(target) = mode.parse_send_target(&buf[FRONT_BUFFER..FRONT_BUFFER + len])
-        else {
+        let Some(target) = mode.parse_send_target(&buf[FRONT_BUFFER..FRONT_BUFFER + len]) else {
             tracing::debug!("Unable to parse route target, dropping packet");
             continue 'pkt;
         };

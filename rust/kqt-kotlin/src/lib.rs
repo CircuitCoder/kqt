@@ -58,7 +58,7 @@ impl ParsedConfig {
                 return Err(ConfigParseError::ParseError(format!(
                     "Failed to parse config: {}",
                     e
-                )))
+                )));
             }
         };
         Ok(ParsedConfig { cfg })
@@ -86,10 +86,14 @@ impl ParsedConfig {
 
     fn start(&self, rt: Arc<Runtime>, fd: std::os::fd::RawFd, mtu: u16) -> BackendHandle {
         let cancel = kqt_lib::tunnel::CancellationToken::new();
-        let corr = kqt_lib::tunnel::run(IfaceSetup::Fd { fd, mtu }, self.cfg.clone(), cancel.clone());
+        let corr =
+            kqt_lib::tunnel::run(IfaceSetup::Fd { fd, mtu }, self.cfg.clone(), cancel.clone());
         let handle = rt.0.spawn(corr);
 
-        BackendHandle { handle: std::sync::Mutex::new(Some(handle)), cancel }
+        BackendHandle {
+            handle: std::sync::Mutex::new(Some(handle)),
+            cancel,
+        }
     }
 }
 
