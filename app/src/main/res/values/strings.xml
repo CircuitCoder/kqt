@@ -11,4 +11,6 @@
     <string name="import_cfg">Import</string>
     <string name="save">Save</string>
     <string name="configuration">Configuration</string>
+    <string name="vpn_name_empty">Name cannot be empty</string>
+    <string name="vpn_name_too_long">Name is too long (max 50 characters)</string>
 </resources>
