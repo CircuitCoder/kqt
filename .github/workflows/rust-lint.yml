@@ -49,6 +49,10 @@ jobs:
       - name: Install cargo-udeps
         run: cargo install cargo-udeps --locked
 
-      - name: Check for unused dependencies
+      - name: Check unused dependencies in kqt-lib
         working-directory: ./rust
-        run: cargo udeps --workspace --all-targets
+        run: cargo udeps --package kqt-lib --all-targets
+
+      - name: Check unused dependencies in kqt
+        working-directory: ./rust
+        run: cargo udeps --package kqt --all-targets

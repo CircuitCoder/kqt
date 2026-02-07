@@ -62,7 +62,7 @@ jobs:
         working-directory: ./rust
         env:
           RUSTFLAGS: "-D warnings"
-        run: cargo build --workspace --release --verbose
+        run: cargo build --package kqt --release --verbose
 
       - name: Prepare binaries for upload
         if: matrix.upload-artifact == true
