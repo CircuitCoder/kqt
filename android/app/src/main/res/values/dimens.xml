@@ -1,0 +1,7 @@
+<resources>
+    <dimen name="list_content_padding">16dp</dimen>
+    <dimen name="vpn_field_height">56dp</dimen>
+    <dimen name="vpn_field_corner">4dp</dimen>
+    <dimen name="vpn_icon_button_elevation">2dp</dimen>
+    <dimen name="bottom_sheet_peek_height">240dp</dimen>
+</resources>

@@ -1,0 +1,111 @@
+{
+  "name": "TOML",
+  "scopeName": "source.toml",
+  "fileTypes": ["toml"],
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#tables"
+    },
+    {
+      "include": "#keys"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#booleans"
+    },
+    {
+      "include": "#dates"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "name": "comment.line.number-sign.toml",
+      "match": "#.*$"
+    },
+    "tables": {
+      "patterns": [
+        {
+          "name": "entity.name.section.toml",
+          "match": "^\\s*\\[\\[?([^\\]]+)\\]\\]?",
+          "captures": {
+            "1": {
+              "name": "entity.name.tag.toml"
+            }
+          }
+        }
+      ]
+    },
+    "keys": {
+      "name": "variable.other.key.toml",
+      "match": "^\\s*([A-Za-z0-9_-]+)\\s*(?==)",
+      "captures": {
+        "1": {
+          "name": "variable.other.key.toml"
+        }
+      }
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.toml",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.toml",
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.toml",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.toml",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.toml",
+          "match": "\\b-?\\d+(\\.\\d+)?([eE][+-]?\\d+)?\\b"
+        },
+        {
+          "name": "constant.numeric.toml",
+          "match": "\\b0x[0-9A-Fa-f]+\\b"
+        },
+        {
+          "name": "constant.numeric.toml",
+          "match": "\\b0o[0-7]+\\b"
+        },
+        {
+          "name": "constant.numeric.toml",
+          "match": "\\b0b[01]+\\b"
+        }
+      ]
+    },
+    "booleans": {
+      "name": "constant.language.boolean.toml",
+      "match": "\\b(true|false)\\b"
+    },
+    "dates": {
+      "name": "constant.other.datetime.toml",
+      "match": "\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})?)?\\b"
+    }
+  }
+}
+
