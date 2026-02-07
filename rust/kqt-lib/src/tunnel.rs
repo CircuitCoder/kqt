@@ -183,7 +183,29 @@ impl Config {
     }
 }
 
-pub async fn run(iface: IfaceSetup, cfg: crate::config::Config) -> anyhow::Result<!> {
+#[derive(Clone)]
+pub struct CancellationToken(tokio_util::sync::CancellationToken);
+impl CancellationToken {
+    pub fn new() -> Self {
+        Self(tokio_util::sync::CancellationToken::new())
+    }
+
+    pub fn cancel(&self) {
+        self.0.cancel();
+    }
+
+    pub fn spawn<R: Send + Sync + 'static>(&self, fut: impl std::future::Future<Output = R> + Send + 'static) -> tokio::task::JoinHandle<Option<R>> {
+        let child_token = self.0.clone();
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = child_token.cancelled() => None,
+                r = fut => Some(r),
+            }
+        })
+    }
+}
+
+pub async fn run(iface: IfaceSetup, cfg: crate::config::Config, cancel: CancellationToken) -> anyhow::Result<()> {
     // Create Trust Ancrhos & verifier
     let trusts = cfg
         .anchor
@@ -265,7 +287,7 @@ pub async fn run(iface: IfaceSetup, cfg: crate::config::Config) -> anyhow::Resul
 
     // Handle client
     for conn_cfg in cfg.connect_to {
-        tokio::spawn(handle_target(
+        cancel.spawn(handle_target(
             endpoint.clone(),
             device.clone(),
             conn_cfg,
@@ -276,14 +298,20 @@ pub async fn run(iface: IfaceSetup, cfg: crate::config::Config) -> anyhow::Resul
 
     // Handle server
     if cfg.listen.is_some() {
-        tokio::spawn(handle_server(
+        cancel.spawn(handle_server(
             endpoint,
             device.clone(),
             store.clone(),
             cfg.mode,
+            cancel.clone(),
         ));
     }
 
+    cancel.spawn(main_loop(device, cfg.mode, store, iface)).await?;
+    Ok(())
+}
+
+async fn main_loop(device: Arc<tun_rs::AsyncDevice>, mode: Mode, store: Peers, _iface: IfaceSetup) -> anyhow::Result<()> {
     // Main loop
     let mut buf = Vec::new();
     'pkt: loop {
@@ -296,16 +324,14 @@ pub async fn run(iface: IfaceSetup, cfg: crate::config::Config) -> anyhow::Resul
         {
             let IfaceSetup::Fd {
                 mtu: ref init_mtu, ..
-            } = iface;
+            } = _iface;
             mtu = *init_mtu;
         }
         buf.resize(mtu as usize + ETH_HDR_LEN + FRONT_BUFFER, 0);
-        let buf_start = buf.as_ptr();
+        let buf_start = buf.as_ptr() as usize;
         let len: usize = device.recv(&mut buf[FRONT_BUFFER..]).await?;
 
-        let Some(target) = cfg
-            .mode
-            .parse_send_target(&buf[FRONT_BUFFER..FRONT_BUFFER + len])
+        let Some(target) = mode.parse_send_target(&buf[FRONT_BUFFER..FRONT_BUFFER + len])
         else {
             tracing::debug!("Unable to parse route target, dropping packet");
             continue 'pkt;
@@ -313,14 +339,14 @@ pub async fn run(iface: IfaceSetup, cfg: crate::config::Config) -> anyhow::Resul
 
         let mut active = &mut buf[FRONT_BUFFER..FRONT_BUFFER + len];
         let mut frag = None;
-        let orig_frag = ip_has_more_frag(&active[cfg.mode.extra_hdr()..]);
+        let orig_frag = ip_has_more_frag(&active[mode.extra_hdr()..]);
 
         #[allow(unused)]
         'frag: loop {
             let active_len = active.len();
             // Don't frag on first try.
             let sending = if let Some(frag) = frag {
-                frag_if_needed(frag, active, orig_frag, cfg.mode.extra_hdr())?
+                frag_if_needed(frag, active, orig_frag, mode.extra_hdr())?
             } else {
                 &active[..]
             };
@@ -334,7 +360,7 @@ pub async fn run(iface: IfaceSetup, cfg: crate::config::Config) -> anyhow::Resul
                     break;
                 }
 
-                active = move_frag_headers(sending_len, active, cfg.mode.extra_hdr());
+                active = move_frag_headers(sending_len, active, mode.extra_hdr());
                 continue;
             };
 
@@ -347,20 +373,20 @@ pub async fn run(iface: IfaceSetup, cfg: crate::config::Config) -> anyhow::Resul
                     continue;
                 }
 
-                if ip_can_frag(&sending[cfg.mode.extra_hdr()..]) {
+                if ip_can_frag(&sending[mode.extra_hdr()..]) {
                     frag = Some(mtu);
                     continue;
                 }
 
                 tracing::debug!("Generating packet too big");
-                let pkt_start = sending.as_ptr() as usize - buf_start as usize;
+                let pkt_start = sending.as_ptr() as usize - buf_start;
                 let pkt_len = sending_len;
                 if let Some(pkt) = populate_packet_too_big(
-                    mtu - cfg.mode.extra_hdr(),
+                    mtu - mode.extra_hdr(),
                     &mut buf,
                     pkt_start,
                     pkt_len,
-                    cfg.mode.eth_extra_hdr(),
+                    mode.eth_extra_hdr(),
                 )? {
                     device.send(pkt).await?;
                 }
@@ -472,6 +498,7 @@ async fn handle_server(
     device: Arc<tun_rs::AsyncDevice>,
     store: Peers,
     mode: Mode,
+    cancel: CancellationToken,
 ) -> anyhow::Result<()> {
     tracing::info!("Listening on {}", ep.local_addr()?);
     while let Some(incoming) = ep.accept().await {
@@ -479,7 +506,7 @@ async fn handle_server(
         let from = conn.remote_address();
         let device_clone = device.clone();
         let store_clone = store.clone();
-        tokio::spawn(async move {
+        cancel.spawn(async move {
             let Err(e) = handle_connection(conn, device_clone, None, store_clone, mode).await;
             tracing::error!("Incoming connection from {} closed: {}", from, e);
         });

@@ -3,7 +3,7 @@ use std::net::{IpAddr, SocketAddr};
 use cidr::IpInet;
 use serde::Deserialize;
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct Config {
     /// Local keypair
     pub keypair: String,
@@ -51,21 +51,21 @@ impl Default for Mode {
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct ConnectTo {
     pub endpoint: SocketAddr,
     #[serde(default)]
     pub designated_range: Vec<IpInet>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct Route {
     pub to: cidr::IpInet,
     pub via: IpAddr,
     pub metric: Option<u32>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct Advanced {
     /// Initial outer connection MTU
     pub initial_outer_mtu: u16,

@@ -13,7 +13,7 @@ pub struct Server {
 }
 
 impl Server {
-    pub async fn run(self) -> anyhow::Result<!> {
+    pub async fn run(self) -> anyhow::Result<()> {
         let s = std::fs::read_to_string(&self.config)?;
         let cfg: Config = toml::de::from_str(&s)?;
 
@@ -24,6 +24,7 @@ impl Server {
         }
 
         let iface = IfaceSetup::Create(self.name);
-        kqt_lib::tunnel::run(iface, cfg).await
+        let cancel = kqt_lib::tunnel::CancellationToken::new();
+        kqt_lib::tunnel::run(iface, cfg, cancel).await
     }
 }

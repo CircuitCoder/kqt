@@ -3,5 +3,5 @@ resolver = "3"
 members = [
   "kqt",
   "kqt-lib",
-  "kqt-android",
+  "kqt-kotlin",
 ]

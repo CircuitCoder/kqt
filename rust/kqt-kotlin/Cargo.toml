@@ -1,0 +1,23 @@
+[package]
+name = "kqt-kotlin"
+version = "0.0.1"
+edition = "2024"
+
+[dependencies]
+uniffi = { version = "0.31.0", features = [ "cli" ] }
+kqt-lib = { path = "../kqt-lib" }
+toml = "0.9.8"
+thiserror = "1.0"
+tokio = { version = "1.46", features = ["net", "rt-multi-thread", "rt", "macros"] }
+
+[build-dependencies]
+uniffi = { version = "0.31.0", features = [ "build" ] }
+
+[lib]
+name="kqt"
+crate-type=["cdylib"]
+
+[[bin]]
+# This can be whatever name makes sense for your project, but the rest of this tutorial assumes uniffi-bindgen.
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"

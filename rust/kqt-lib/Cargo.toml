@@ -26,3 +26,4 @@ cidr = { version = "0.3.1", features = ["serde"] }
 ring = "*"
 pnet_packet = "0.35.0"
 net-route = { version = "0.4.6", optional = true }
+tokio-util = "0.7.18"
