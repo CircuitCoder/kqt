@@ -22,6 +22,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".KeyProvisioningActivity"
+            android:exported="false"
+            android:label="@string/key_provisioning_title"
+            android:theme="@style/Theme.Kqt" />
+       <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:label="@string/settings_title"
+            android:theme="@style/Theme.Kqt" />
     </application>
 
 </manifest>

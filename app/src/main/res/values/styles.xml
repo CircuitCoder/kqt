@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Shape appearance for button group - left button (rounded left corners only) -->
+    <style name="ShapeAppearance.Material3.Corner.Left" parent="@style/ShapeAppearance.M3.Comp.Button.Small.Container.Shape.Round">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSizeTopRight">4dp</item>
+        <item name="cornerSizeBottomRight">4dp</item>
+    </style>
+
+    <!-- Shape appearance for button group - right button (rounded right corners only) -->
+    <style name="ShapeAppearance.Material3.Corner.Right" parent="@style/ShapeAppearance.M3.Comp.Button.Small.Container.Shape.Round">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSizeTopLeft">4dp</item>
+        <item name="cornerSizeBottomLeft">4dp</item>
+    </style>
+</resources>
+

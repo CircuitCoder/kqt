@@ -1,5 +1,7 @@
 <resources>
     <string name="app_name">kqt</string>
+    <string name="key_provisioning_title">Key Provisioning</string>
+    <string name="settings_title">Settings</string>
     <string name="vpn_name">VPN name</string>
     <string name="vpn_config">Config</string>
     <string name="close">Close</string>
@@ -10,7 +12,16 @@
     <string name="export_cfg">Export</string>
     <string name="import_cfg">Import</string>
     <string name="save">Save</string>
+    <string name="delete">Delete</string>
+    <string name="delete_vpn_title">Delete VPN</string>
+    <string name="delete_vpn_message">Are you sure you want to delete \"%1$s\"?</string>
     <string name="configuration">Configuration</string>
     <string name="vpn_name_empty">Name cannot be empty</string>
     <string name="vpn_name_too_long">Name is too long (max 50 characters)</string>
+    <string name="add_vpn">Add VPN</string>
+    <string name="settings">Settings</string>
+    <string name="reset_storage">Reset Storage</string>
+    <string name="config_placeholder">[Configuration will be displayed here]</string>
+    <string name="empty_state_hint">Tap the + button to add a VPN</string>
+    <string name="no_config_tooltip">Import or create a configuration first</string>
 </resources>
