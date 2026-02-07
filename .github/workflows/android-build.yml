@@ -33,8 +33,17 @@ jobs:
         run: cargo install cargo-ndk --locked
 
       - name: Build native library with cargo-ndk
-        working-directory: ./rust/kqt-android
-        run: cargo ndk -t arm64-v8a -o app/src/main/jniLibs/ build --release
+        working-directory: ./rust/kqt-kotlin
+        run: cargo ndk -t arm64-v8a build --lib --release -o ./libs
+
+      - name: Copy native library to jniLibs
+        run: |
+          mkdir -p rust/kqt-android/app/src/main/jniLibs/arm64-v8a
+          cp rust/kqt-kotlin/libs/arm64-v8a/libkqt.so rust/kqt-android/app/src/main/jniLibs/arm64-v8a/
+
+      - name: Generate Kotlin bindings with uniffi-bindgen
+        working-directory: ./rust/kqt-kotlin
+        run: cargo run --features=uniffi/cli --bin uniffi-bindgen generate --library ./libs/arm64-v8a/libkqt.so -o ../kqt-android/app/src/main/java/uniffi/kqt --language kotlin
 
       - name: Get commit SHA
         id: git-info
