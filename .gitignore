@@ -3,3 +3,4 @@
 compile_commands.json
 /tests/run
 /rust/tests/run
+/android
