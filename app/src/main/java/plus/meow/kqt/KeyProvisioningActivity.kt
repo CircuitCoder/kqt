@@ -8,10 +8,12 @@ import android.widget.RadioButton
 import android.widget.RadioGroup
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.textview.MaterialTextView
+import kotlinx.coroutines.launch
 import plus.meow.kqt.crypto.BiometricAuthManager
 import plus.meow.kqt.crypto.CryptoManager
 import plus.meow.kqt.crypto.KeyProvisioningManager
@@ -48,7 +50,7 @@ class KeyProvisioningActivity : AppCompatActivity() {
 
         // Initialize managers
         provisioningManager = KeyProvisioningManager(this)
-        cryptoManager = CryptoManager()
+        cryptoManager = CryptoManager(this, provisioningManager)
         biometricAuthManager = BiometricAuthManager(this)
         keystoreCapabilities = KeystoreCapabilities(this)
 
@@ -319,29 +321,15 @@ class KeyProvisioningActivity : AppCompatActivity() {
     }
 
     private fun showTestAuthentication() {
-        biometricAuthManager.authenticate(
-            title = "Test Authentication",
-            subtitle = "Verify that authentication works",
-            description = "This is a one-time test to ensure your chosen security method works properly."
-        ) { result ->
-            when (result) {
-                is BiometricAuthManager.AuthResult.Success -> {
-                    provisionKey()
-                }
-                is BiometricAuthManager.AuthResult.Error -> {
-                    Snackbar.make(
-                        continueButton,
-                        "Authentication error: ${result.errorMessage}",
-                        Snackbar.LENGTH_LONG
-                    ).show()
-                }
-                is BiometricAuthManager.AuthResult.Failed -> {
-                    Snackbar.make(
-                        continueButton,
-                        "Authentication failed. Please try again.",
-                        Snackbar.LENGTH_SHORT
-                    ).show()
-                }
+        lifecycleScope.launch {
+            val success = biometricAuthManager.authenticate(
+                title = "Test Authentication",
+                subtitle = "Verify that authentication works",
+                description = "This is a one-time test to ensure your chosen security method works properly."
+            )
+
+            if (success) {
+                provisionKey()
             }
         }
     }
@@ -379,5 +367,3 @@ class KeyProvisioningActivity : AppCompatActivity() {
 
     private data class Feature(val text: String, val isPositive: Boolean)
 }
-
-

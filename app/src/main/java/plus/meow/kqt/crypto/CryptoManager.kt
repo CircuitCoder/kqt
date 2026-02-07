@@ -3,6 +3,7 @@ package plus.meow.kqt.crypto
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import androidx.fragment.app.FragmentActivity
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -15,7 +16,14 @@ import javax.crypto.spec.GCMParameterSpec
  * Uses a single master AES-256-GCM key stored in the best available keystore backend
  * (StrongBox if available, otherwise TEE).
  */
-class CryptoManager {
+class CryptoManager(
+    private val activity: FragmentActivity,
+    private val provisioningManager: KeyProvisioningManager
+) {
+
+    private val biometricAuthManager: BiometricAuthManager by lazy {
+        BiometricAuthManager(activity)
+    }
 
     companion object {
         private const val MASTER_KEY_ALIAS = "vpn_master_key"
@@ -55,17 +63,58 @@ class CryptoManager {
     }
 
     /**
-     * Get or create the master encryption key.
-     * This key is stored in the best available keystore backend (StrongBox or TEE).
+     * Get the master encryption key and perform authentication if required.
      *
-     * @param securityTier Optional security tier for key creation. Only used when creating a new key.
+     * @return SecretKey if successful, null if authentication failed
+     * @throws IllegalStateException if key doesn't exist (not provisioned)
      */
-    private fun getOrCreateMasterKey(securityTier: SecurityTier = SecurityTier.TIMEOUT_5_MIN): SecretKey {
-        if (keyStore.containsAlias(MASTER_KEY_ALIAS)) {
-            return keyStore.getKey(MASTER_KEY_ALIAS, null) as SecretKey
+    private suspend fun getMasterKey(): SecretKey? {
+        if (!keyStore.containsAlias(MASTER_KEY_ALIAS)) {
+            throw IllegalStateException("Master key not provisioned. Please provision a key first.")
         }
 
-        return createMasterKey(securityTier)
+        val masterKey = keyStore.getKey(MASTER_KEY_ALIAS, null) as SecretKey
+        val securityTier = provisioningManager.getSecurityTier()
+            ?: throw IllegalStateException("Security tier not configured")
+
+        // Check if we need to authenticate
+        if (securityTier.requiresAuthentication()) {
+            // Get key info to check authentication state
+            val factory = javax.crypto.SecretKeyFactory.getInstance(
+                masterKey.algorithm,
+                ANDROID_KEYSTORE
+            )
+
+            @Suppress("DEPRECATION")
+            val keyInfo = factory.getKeySpec(
+                masterKey,
+                android.security.keystore.KeyInfo::class.java
+            ) as android.security.keystore.KeyInfo
+
+            // Determine if we need to show biometric prompt
+            val needsAuth = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                // For Android 11+, check user authentication validity
+                keyInfo.isUserAuthenticationRequired
+            } else {
+                // For older versions, always require auth for every-use tiers
+                keyInfo.isUserAuthenticationRequired
+            }
+
+            if (needsAuth) {
+                // Show biometric authentication prompt
+                val authSuccess = biometricAuthManager.authenticate(
+                    title = "Authenticate",
+                    subtitle = "Access encrypted VPN configurations",
+                    description = "Authentication required to decrypt your VPN data"
+                )
+
+                if (!authSuccess) {
+                    return null // Authentication failed
+                }
+            }
+        }
+
+        return masterKey
     }
 
     /**
@@ -180,15 +229,14 @@ class CryptoManager {
 
     /**
      * Encrypt data using AES-256-GCM.
-     * Requires biometric authentication (with 120-second timeout).
+     * May require biometric authentication depending on security tier.
      *
      * @param plaintext The data to encrypt
-     * @return EncryptedData containing IV and ciphertext
+     * @return EncryptedData containing IV and ciphertext, or null if authentication failed
      * @throws javax.crypto.IllegalBlockSizeException if encryption fails
-     * @throws android.security.keystore.UserNotAuthenticatedException if user needs to authenticate
      */
-    fun encrypt(plaintext: String): EncryptedData {
-        val masterKey = getOrCreateMasterKey()
+    suspend fun encrypt(plaintext: String): EncryptedData? {
+        val masterKey = getMasterKey() ?: return null
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, masterKey)
 
@@ -200,15 +248,14 @@ class CryptoManager {
 
     /**
      * Decrypt data using AES-256-GCM.
-     * Requires biometric authentication (with 120-second timeout).
+     * May require biometric authentication depending on security tier.
      *
      * @param encryptedData The encrypted data containing IV and ciphertext
-     * @return Decrypted plaintext string
+     * @return Decrypted plaintext string, or null if authentication failed
      * @throws javax.crypto.AEADBadTagException if data has been tampered with
-     * @throws android.security.keystore.UserNotAuthenticatedException if user needs to authenticate
      */
-    fun decrypt(encryptedData: EncryptedData): String {
-        val masterKey = getOrCreateMasterKey()
+    suspend fun decrypt(encryptedData: EncryptedData): String? {
+        val masterKey = getMasterKey() ?: return null
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.DECRYPT_MODE, masterKey, GCMParameterSpec(GCM_TAG_LENGTH, encryptedData.iv))
 
@@ -218,9 +265,9 @@ class CryptoManager {
 
     /**
      * Decrypt data with nullable IV and ciphertext arrays.
-     * Returns null if either parameter is null.
+     * Returns null if either parameter is null or if authentication failed.
      */
-    fun decrypt(iv: ByteArray?, ciphertext: ByteArray?): String? {
+    suspend fun decrypt(iv: ByteArray?, ciphertext: ByteArray?): String? {
         if (iv == null || ciphertext == null) {
             return null
         }

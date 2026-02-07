@@ -7,6 +7,7 @@ import android.view.MenuItem
 import android.view.View
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -39,7 +40,7 @@ class MainActivity : AppCompatActivity() {
 
         // Initialize crypto manager and repository
         val database = VpnConfigDatabase.getInstance(this)
-        cryptoManager = CryptoManager()
+        cryptoManager = CryptoManager(this, provisioningManager)
         repository = VpnConfigRepository(database.vpnConfigDao())
 
         // Check if key is provisioned, if not, launch provisioning activity

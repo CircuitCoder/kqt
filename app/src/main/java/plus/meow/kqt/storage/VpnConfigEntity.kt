@@ -1,6 +1,5 @@
 package plus.meow.kqt.storage
 
-import android.security.keystore.UserNotAuthenticatedException
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import plus.meow.kqt.crypto.CryptoManager
@@ -62,6 +61,10 @@ data class VpnConfigEntity(
             override fun toString() = "Biometric authentication required"
         }
 
+        object AuthenticationFailure : CryptoError() {
+            override fun toString() = "Authentication failed or was rejected by user"
+        }
+
         data class Failed(val message: String, val exception: Exception? = null) : CryptoError() {
             override fun toString() = "Crypto error: $message"
         }
@@ -72,14 +75,17 @@ data class VpnConfigEntity(
      *
      * @param cryptoManager The crypto manager to use for decryption
      * @return Result.Ok with the config string (or null if not configured),
-     *         Result.Err with CryptoError if authentication required or decryption failed
+     *         Result.Err with CryptoError if authentication failed or decryption failed
      */
-    fun decryptConfig(cryptoManager: CryptoManager): Result<String?, CryptoError> {
+    suspend fun decryptConfig(cryptoManager: CryptoManager): Result<String?, CryptoError> {
         return try {
             val decrypted = cryptoManager.decrypt(iv, encryptedConfig)
-            Result.ok(decrypted)
-        } catch (_: UserNotAuthenticatedException) {
-            Result.err(CryptoError.AuthenticationRequired)
+            if (decrypted == null) {
+                // Authentication failed
+                Result.err(CryptoError.AuthenticationFailure)
+            } else {
+                Result.ok(decrypted)
+            }
         } catch (e: Exception) {
             Result.err(CryptoError.Failed("Failed to decrypt config: ${e.message}", e))
         }
@@ -92,23 +98,25 @@ data class VpnConfigEntity(
      * @param newConfig The new configuration string to encrypt
      * @param cryptoManager The crypto manager to use for encryption
      * @return Result.Ok with the updated entity,
-     *         Result.Err with CryptoError if authentication required or encryption failed
+     *         Result.Err with CryptoError if authentication failed or encryption failed
      */
-    fun withNameAndConfig(
+    suspend fun withNameAndConfig(
         newName: String,
         newConfig: String,
         cryptoManager: CryptoManager
     ): Result<VpnConfigEntity, CryptoError> {
         return try {
             val encrypted = cryptoManager.encrypt(newConfig)
+            if (encrypted == null) {
+                // Authentication failed
+                return Result.err(CryptoError.AuthenticationFailure)
+            }
             val updated = this.copy(
                 name = newName,
                 encryptedConfig = encrypted.ciphertext,
                 iv = encrypted.iv
             )
             Result.ok(updated)
-        } catch (_: UserNotAuthenticatedException) {
-            Result.err(CryptoError.AuthenticationRequired)
         } catch (e: Exception) {
             Result.err(CryptoError.Failed("Failed to update entity: ${e.message}", e))
         }
@@ -123,9 +131,9 @@ data class VpnConfigEntity(
          * @param config The configuration string to encrypt (null for no config)
          * @param cryptoManager The crypto manager to use for encryption
          * @return Result.Ok with the created entity,
-         *         Result.Err with CryptoError if authentication required or encryption failed
+         *         Result.Err with CryptoError if authentication failed or encryption failed
          */
-        fun create(
+        suspend fun create(
             name: String,
             config: String?,
             cryptoManager: CryptoManager
@@ -133,6 +141,10 @@ data class VpnConfigEntity(
             return try {
                 val (encryptedConfig, iv) = if (config != null) {
                     val encrypted = cryptoManager.encrypt(config)
+                    if (encrypted == null) {
+                        // Authentication failed
+                        return Result.err(CryptoError.AuthenticationFailure)
+                    }
                     encrypted.ciphertext to encrypted.iv
                 } else {
                     null to null
@@ -145,8 +157,6 @@ data class VpnConfigEntity(
                     iv = iv
                 )
                 Result.ok(entity)
-            } catch (_: UserNotAuthenticatedException) {
-                Result.err(CryptoError.AuthenticationRequired)
             } catch (e: Exception) {
                 Result.err(CryptoError.Failed("Failed to create entity: ${e.message}", e))
             }

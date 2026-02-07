@@ -116,12 +116,15 @@ class SettingsActivity : AppCompatActivity() {
                 val database = VpnConfigDatabase.getInstance(this@SettingsActivity)
                 database.vpnConfigDao().deleteAll()
 
-                // 2. Delete encryption keys from keystore
-                val cryptoManager = CryptoManager()
-                cryptoManager.deleteMasterKey()
-
-                // 3. Reset provisioning state
+                // 2. Reset provisioning state first (before deleting key)
                 val provisioningManager = KeyProvisioningManager(this@SettingsActivity)
+
+                // 3. Delete encryption keys from keystore (needs activity context)
+                withContext(Dispatchers.Main) {
+                    val cryptoManager = CryptoManager(this@SettingsActivity, provisioningManager)
+                    cryptoManager.deleteMasterKey()
+                }
+
                 provisioningManager.reset()
 
                 // 4. Clear database instance

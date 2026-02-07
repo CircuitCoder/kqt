@@ -1,23 +1,18 @@
 package plus.meow.kqt.crypto
 
+import android.widget.Toast
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 /**
  * Manages biometric authentication prompts.
  */
 class BiometricAuthManager(private val activity: FragmentActivity) {
 
-    /**
-     * Result of a biometric authentication attempt.
-     */
-    sealed class AuthResult {
-        object Success : AuthResult()
-        data class Error(val errorCode: Int, val errorMessage: String) : AuthResult()
-        object Failed : AuthResult()
-    }
 
     /**
      * Check if biometric authentication is available on this device.
@@ -39,14 +34,13 @@ class BiometricAuthManager(private val activity: FragmentActivity) {
      * @param title Prompt title
      * @param subtitle Optional subtitle
      * @param description Optional description
-     * @param onResult Callback with authentication result
+     * @return true if authentication succeeded, false otherwise
      */
-    fun authenticate(
+    suspend fun authenticate(
         title: String,
         subtitle: String? = null,
-        description: String? = null,
-        onResult: (AuthResult) -> Unit
-    ) {
+        description: String? = null
+    ): Boolean = suspendCancellableCoroutine { continuation ->
         val executor = ContextCompat.getMainExecutor(activity)
 
         val biometricPrompt = BiometricPrompt(
@@ -55,17 +49,19 @@ class BiometricAuthManager(private val activity: FragmentActivity) {
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                     super.onAuthenticationSucceeded(result)
-                    onResult(AuthResult.Success)
+                    continuation.resume(true)
                 }
 
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                     super.onAuthenticationError(errorCode, errString)
-                    onResult(AuthResult.Error(errorCode, errString.toString()))
+                    Toast.makeText(activity, errString.toString(), Toast.LENGTH_SHORT).show()
+                    continuation.resume(false)
                 }
 
                 override fun onAuthenticationFailed() {
                     super.onAuthenticationFailed()
-                    onResult(AuthResult.Failed)
+                    Toast.makeText(activity, "Authentication failed", Toast.LENGTH_SHORT).show()
+                    continuation.resume(false)
                 }
             }
         )
@@ -83,6 +79,10 @@ class BiometricAuthManager(private val activity: FragmentActivity) {
             .build()
 
         biometricPrompt.authenticate(promptInfo)
+
+        continuation.invokeOnCancellation {
+            biometricPrompt.cancelAuthentication()
+        }
     }
 }
 
