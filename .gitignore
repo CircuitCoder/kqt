@@ -13,3 +13,6 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+app/src/main/java/uniffi
+app/src/main/jniLibs

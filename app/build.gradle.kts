@@ -49,6 +49,7 @@ dependencies {
     ksp(libs.androidx.room.compiler)
     implementation(libs.androidx.biometric)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.jna)
     implementation(libs.sora.editor)
     implementation(libs.sora.editor.language.textmate)
     testImplementation(libs.junit)
