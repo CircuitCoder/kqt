@@ -1,5 +1,5 @@
 #!/bin/bash
-# Main test runner - runs all test suites
+# Main test runner - runs all test suites using C test runner
 
 set -e
 
@@ -16,6 +16,19 @@ echo -e "${BLUE}======================================${NC}"
 echo -e "${BLUE}  KQT Integration Test Suite Runner  ${NC}"
 echo -e "${BLUE}======================================${NC}"
 echo ""
+
+# Build test runner if needed
+if [ ! -f "$SCRIPT_DIR/test-runner" ]; then
+    echo -e "${YELLOW}Building test runner...${NC}"
+    cd "$SCRIPT_DIR"
+    make
+    echo ""
+fi
+
+# Set KQT_BIN to absolute path if not already set
+if [ -z "$KQT_BIN" ]; then
+    export KQT_BIN="$(cd "$SCRIPT_DIR/.." && pwd)/target/release/kqt"
+fi
 
 # Track test results
 PASSED=0

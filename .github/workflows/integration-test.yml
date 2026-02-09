@@ -32,6 +32,10 @@ jobs:
         working-directory: ./rust
         run: cargo build --bin kqt --release --verbose
 
+      - name: Build test runner
+        working-directory: ./rust/test
+        run: make
+
       - name: Run integration tests
         working-directory: ./rust/test
         run: |
