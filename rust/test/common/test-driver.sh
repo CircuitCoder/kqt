@@ -14,7 +14,9 @@ NC='\033[0m' # No Color
 
 # Check if we need to relaunch in a PID namespace
 # If we're not PID 1, relaunch ourselves in a PID namespace using unshare
-if [ $$ -ne 1 ]; then
+# We use an environment variable to track if we've already relaunched to avoid
+# potential issues if this script is somehow run as actual system PID 1.
+if [ -z "$KQT_TEST_IN_PID_NS" ]; then
     # Check if unshare is available
     if ! command -v unshare >/dev/null 2>&1; then
         echo -e "${RED}Error: unshare command not found${NC}"
@@ -23,7 +25,12 @@ if [ $$ -ne 1 ]; then
     fi
     
     # Get absolute path to this script before exec
+    # This is important because after exec, $0 will be this absolute path,
+    # allowing dirname to work correctly in the new namespace
     SCRIPT_PATH="$(readlink -f "$0")"
+    
+    # Mark that we're relaunching in a PID namespace
+    export KQT_TEST_IN_PID_NS=1
     
     # Relaunch in PID namespace with --kill-child to ensure all children are killed
     # when this script exits. This prevents resource leaks in network namespaces.
@@ -113,8 +120,7 @@ cleanup() {
     
     # All child processes (including kqt nodes) will be automatically killed
     # by the PID namespace when we exit, so we don't need to manually kill them.
-    # Just give them a moment to terminate gracefully.
-    sleep 0.5
+    # The --kill-child flag ensures immediate termination.
     
     # Delete network namespaces (this also deletes veth interfaces)
     # These need to be cleaned up explicitly as they're created in the parent namespace
