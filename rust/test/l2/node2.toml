@@ -1,0 +1,13 @@
+# Node 2 Configuration - L2 Mode
+keypair = "{NODE2_PRIVATE}"
+anchor = ["{CA_PUBLIC}"]
+suffix = "test.local"
+mode = "L2"
+mtu = 8192
+
+address = ["10.21.0.2/24", "fd00::2/64"]
+
+listen = "10.0.0.2:{NODE2_LISTEN_PORT}"
+
+[[connect_to]]
+endpoint = "10.0.0.1:{NODE1_LISTEN_PORT}"

@@ -1,0 +1,2 @@
+[2m2026-02-09T18:48:09.970687Z[0m [32m INFO[0m [2mkqt_lib::tunnel[0m[2m:[0m Listening on 10.0.0.1:9001
+[2m2026-02-09T18:48:09.970697Z[0m [33m WARN[0m [2mquinn_udp[0m[2m:[0m sendmsg error: Os { code: 1, kind: PermissionDenied, message: "Operation not permitted" }, Transmit: { destination: 10.0.0.2:9002, src_ip: None, ecn: Some(Ect0), len: 1200, segment_size: None }

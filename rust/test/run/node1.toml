@@ -1,0 +1,13 @@
+# Node 1 Configuration - L2 Mode
+keypair = "s.odNa4DTu86tyxT3GZsu2m9UWeYhdOZM02W5GxxJwPwE=.rRSPUxeton2yE4F78vE1XTph5nUNOCg8+BvKZ7f8V8E=.KsMykRqEBe3StW235ENMYPGJ3G1I6O5h8YzsJjSZlvoW9Ovpeeb6nhu1m1SGHWG7zY9k8OizYGXY/XA66SbYCw=="
+anchor = ["p.rRSPUxeton2yE4F78vE1XTph5nUNOCg8+BvKZ7f8V8E="]
+suffix = "test.local"
+mode = "L2"
+mtu = 8192
+
+address = ["10.21.0.1/24", "fd00::1/64"]
+
+listen = "10.0.0.1:9001"
+
+[[connect_to]]
+endpoint = "10.0.0.2:9002"

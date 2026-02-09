@@ -1,0 +1,14 @@
+#!/bin/bash
+# Run L3 connectivity test suite
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+TEST_DRIVER="$SCRIPT_DIR/../common/test-driver.sh"
+CONFIG_DIR="$SCRIPT_DIR"
+TEST_SCRIPT="$SCRIPT_DIR/test-connectivity.sh"
+
+echo "Running L3 connectivity test suite..."
+echo ""
+
+bash "$TEST_DRIVER" "$CONFIG_DIR" "$TEST_SCRIPT"
