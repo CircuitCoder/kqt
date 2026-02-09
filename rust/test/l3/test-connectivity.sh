@@ -1,6 +1,7 @@
 #!/bin/bash
 # L3 connectivity test script
 # Tests IPv4 and IPv6 connectivity in L3 mode
+# Runs in the context of node1's network namespace
 
 set -e
 
@@ -16,13 +17,14 @@ echo ""
 # Step 1: Check TUN/TAP device creation
 echo -e "${YELLOW}Test 1: Checking TUN/TAP device creation...${NC}"
 
-if sudo ip netns exec "$NS1" ip link show kqt0 > /dev/null 2>&1; then
-    echo -e "${GREEN}✓ TUN device kqt0 created in $NS1${NC}"
+if ip link show kqt0 > /dev/null 2>&1; then
+    echo -e "${GREEN}✓ TUN device kqt0 created in this namespace${NC}"
 else
-    echo -e "${RED}✗ TUN device kqt0 not found in $NS1${NC}"
+    echo -e "${RED}✗ TUN device kqt0 not found${NC}"
     exit 1
 fi
 
+# Check in peer namespace
 if sudo ip netns exec "$NS2" ip link show kqt0 > /dev/null 2>&1; then
     echo -e "${GREEN}✓ TUN device kqt0 created in $NS2${NC}"
 else
@@ -41,7 +43,7 @@ echo -e "${YELLOW}Test 2: IPv4 connectivity...${NC}"
 
 # Test 2a: Default sized packets
 echo "Test 2a: Ping with default packet size"
-PING_OUTPUT=$(sudo ip netns exec "$NS1" ping -c 4 -W 5 10.21.0.2 2>&1 || true)
+PING_OUTPUT=$(ping -c 4 -W 5 10.21.0.2 2>&1 || true)
 echo "$PING_OUTPUT"
 
 if echo "$PING_OUTPUT" | grep -q " received"; then
@@ -51,7 +53,8 @@ if echo "$PING_OUTPUT" | grep -q " received"; then
     else
         echo -e "${RED}✗ IPv4 ping failed (no packets received)${NC}"
         # Check for permission errors
-        if grep -q "Operation not permitted" "$WORK_DIR/node1.log" "$WORK_DIR/node2.log" 2>/dev/null; then
+        if sudo ip netns exec "$NS1" cat /proc/*/status 2>/dev/null | grep -q "Operation not permitted" || \
+           sudo ip netns exec "$NS2" cat /proc/*/status 2>/dev/null | grep -q "Operation not permitted"; then
             echo -e "${YELLOW}⚠ UDP socket operations are being denied with 'Operation not permitted'${NC}"
             echo -e "${YELLOW}  This is a known limitation in some sandbox environments.${NC}"
             exit 0  # Exit with success since we've verified what we can
@@ -65,7 +68,7 @@ fi
 
 # Test 2b: Large packets
 echo "Test 2b: Ping with large packets"
-PING_OUTPUT=$(sudo ip netns exec "$NS1" ping -c 4 -W 5 -s 5000 -M dont 10.21.0.2 2>&1 || true)
+PING_OUTPUT=$(ping -c 4 -W 5 -s 5000 -M dont 10.21.0.2 2>&1 || true)
 echo "$PING_OUTPUT"
 
 if echo "$PING_OUTPUT" | grep -q " received"; then
@@ -87,7 +90,7 @@ echo -e "${YELLOW}Test 3: IPv6 connectivity...${NC}"
 
 # Test 3a: Default sized packets
 echo "Test 3a: IPv6 ping with default packet size"
-PING6_OUTPUT=$(sudo ip netns exec "$NS1" ping6 -c 4 -W 5 fd00::2 2>&1 || true)
+PING6_OUTPUT=$(ping6 -c 4 -W 5 fd00::2 2>&1 || true)
 echo "$PING6_OUTPUT"
 
 if echo "$PING6_OUTPUT" | grep -q " received"; then
@@ -105,7 +108,7 @@ fi
 
 # Test 3b: Large packets
 echo "Test 3b: IPv6 ping with large packets"
-PING6_OUTPUT=$(sudo ip netns exec "$NS1" ping6 -c 4 -W 5 -s 5000 fd00::2 2>&1 || true)
+PING6_OUTPUT=$(ping6 -c 4 -W 5 -s 5000 fd00::2 2>&1 || true)
 echo "$PING6_OUTPUT"
 
 if echo "$PING6_OUTPUT" | grep -q " received"; then

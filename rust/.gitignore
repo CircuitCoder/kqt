@@ -4,3 +4,4 @@ test.*.toml
 
 # Test artifacts
 test/run/
+test/test-runner

@@ -1,14 +1,14 @@
 # Node 2 Configuration - L3 Mode
-keypair = "{NODE2_PRIVATE}"
-anchor = ["{CA_PUBLIC}"]
+keypair = "s.i+KGksCF3flAC6vddkKv2vD15FaPIkbAmxLUyYPaxOc=.FO52HSpewsIzOnOdMgIRZgvHzc/0n/JKbnJqaIFONSQ=.AvSPiUrxrHeOIHjOOFTtZeXqgIA0EgX6mtN8vzaLg/1JyVGtLpnipN4Gyld450IOuz6RJOtelyb1a7KnSfR9Dw=="
+anchor = ["p.FO52HSpewsIzOnOdMgIRZgvHzc/0n/JKbnJqaIFONSQ="]
 suffix = "test.local"
 mode = "L3"
 mtu = 8192
 
 address = ["10.21.0.2/24", "fd00::2/64"]
 
-listen = "10.0.0.2:{NODE2_LISTEN_PORT}"
+listen = "10.0.0.2:9000"
 
 [[connect_to]]
-endpoint = "10.0.0.1:{NODE1_LISTEN_PORT}"
+endpoint = "10.0.0.1:9000"
 designated_range = ["10.21.0.1/32", "fd00::1/128"]

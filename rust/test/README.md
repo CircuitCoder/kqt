@@ -1,92 +1,88 @@
 # KQT Integration Test Suite
 
-This directory contains the new modular integration test infrastructure for the kqt Rust implementation.
+This directory contains the modular integration test infrastructure for the kqt Rust implementation.
 
 ## Overview
 
-The test infrastructure is organized into:
-- **Pre-generated test fixtures**: Keys and certificates stored in fixtures/ directory
-- **Configuration templates**: Stored in test-specific subdirectories (l2/, l3/, etc.)
-- **Test driver**: Common infrastructure for network namespace setup and teardown
-- **Test suites**: Individual test scripts for different scenarios
+The test infrastructure uses:
+- **C test runner**: Dedicated test runner with PID and network namespace support
+- **Embedded configuration keys**: Test keys are directly embedded in config files
+- **Configuration files**: Each test suite has pre-configured TOML files
+- **Test scripts**: Shell scripts that verify connectivity and behavior
 - **Test runners**: Scripts to execute each test suite
 
-**Important:** This test infrastructure uses **pre-generated test keys** from the `fixtures/` directory. Keys are never generated on the fly to ensure CI reproducibility and faster test execution.
+## Architecture
+
+The test runner (`test-runner.c`) provides:
+- **PID Namespace Isolation**: Relaunches itself in a PID namespace
+- **PR_SET_PDEATHSIG**: Ensures child processes are cleaned up when parent exits
+- **Network Namespace Management**: Creates temporary network namespaces for each node
+- **Automatic Cleanup**: All resources are properly cleaned up on exit
+
+Each node runs in its own network namespace with its own veth interface, eliminating the need for different ports.
 
 ## Directory Structure
 
 ```
 test/
-├── common/
-│   ├── generate-keys.sh      # Script to regenerate test fixtures (rarely needed)
-│   └── test-driver.sh         # Core test driver (netns, veth, process mgmt)
-├── fixtures/
-│   ├── ca-private.txt        # Pre-generated CA private key
-│   ├── ca-public.cert        # Pre-generated CA certificate
-│   ├── node1-private.txt     # Pre-generated node1 private key
-│   ├── node1-public.cert     # Pre-generated node1 certificate
-│   ├── node2-private.txt     # Pre-generated node2 private key
-│   ├── node2-public.cert     # Pre-generated node2 certificate
-│   └── README.md             # Fixtures documentation
+├── test-runner.c          # C test runner (netns, PID namespace, cleanup)
+├── Makefile               # Builds test-runner
 ├── l2/
-│   ├── node1.toml            # L2 mode config template for node1
-│   ├── node2.toml            # L2 mode config template for node2
+│   ├── node1.toml        # L2 mode config for node1 (embedded keys)
+│   ├── node2.toml        # L2 mode config for node2 (embedded keys)
 │   ├── test-connectivity.sh  # L2 connectivity tests
-│   └── run.sh                # L2 test suite runner
+│   └── run.sh            # L2 test suite runner
 ├── l3/
-│   ├── node1.toml            # L3 mode config template for node1
-│   ├── node2.toml            # L3 mode config template for node2
+│   ├── node1.toml        # L3 mode config for node1 (embedded keys)
+│   ├── node2.toml        # L3 mode config for node2 (embedded keys)
 │   ├── test-connectivity.sh  # L3 connectivity tests
-│   └── run.sh                # L3 test suite runner
+│   └── run.sh            # L3 test suite runner
 ├── l2-l3-incompatible/
-│   ├── node1.toml            # L2 mode config (node1)
-│   ├── node2.toml            # L3 mode config (node2)
+│   ├── node1.toml        # L2 mode config (node1)
+│   ├── node2.toml        # L3 mode config (node2)
 │   ├── test-incompatibility.sh # L2-L3 incompatibility test
-│   └── run.sh                # Incompatibility test runner
-├── run-all.sh                # Run all test suites
-└── README.md                 # This file
+│   └── run.sh            # Incompatibility test runner
+├── run-all.sh            # Run all test suites
+└── README.md             # This file
 ```
 
-## Test Driver Features
+## C Test Runner Features
 
-The test driver (`common/test-driver.sh`) provides:
+The test runner (`test-runner.c`) is a dedicated C program that provides:
 
 1. **PID Namespace Isolation**
-   - Automatically launches in a PID namespace using `unshare --pid --fork --kill-child`
-   - Runs as PID 1 within the namespace for proper process management
-   - All child processes are automatically killed when the driver exits
-   - Prevents resource leaks in network namespaces
-   - Ensures reliable cleanup even on abnormal termination (SIGKILL, SIGTERM, etc.)
+   - Detects if not running as PID 1
+   - Automatically relaunches itself in a PID namespace
+   - Mounts /proc in the new namespace
+   - All child processes are automatically cleaned up on exit
 
-2. **Network Namespace Management**
-   - Creates isolated network namespaces for each node
+2. **PR_SET_PDEATHSIG**
+   - Each child process uses PR_SET_PDEATHSIG
+   - Ensures children are terminated if parent dies
+   - Prevents orphaned processes
+
+3. **Network Namespace Management**
+   - Creates temporary network namespaces for each node
    - Automatically cleans up namespaces on exit
    - No persistent bindings (namespaces deleted after test)
 
-3. **Veth Pair Creation**
+4. **Veth Pair Creation**
    - Creates virtual ethernet pairs to connect namespaces
    - Configures IP addresses (10.0.0.1/24 and 10.0.0.2/24)
-   - Brings up interfaces automatically
+   - Each node in separate namespace (same port 9000 for both)
 
-4. **Process Management**
+5. **Process Management**
    - Starts kqt nodes in their respective namespaces
-   - Tracks process IDs for debugging
-   - Handles cleanup on any exit signal (normal, interrupt, or error)
-   - Child processes inherit proper signal handling from PID namespace
+   - Handles cleanup on any exit signal
+   - Proper signal handling for graceful shutdown
 
-5. **Configuration Management**
-   - Uses pre-generated keys from fixtures/ directory (never generates on the fly)
-   - Replaces placeholders in config templates with actual keys
-   - Creates working configs in run/ directory
+## Test Configuration
 
-## Test Fixtures
-
-Test keys and certificates are pre-generated and stored in the `fixtures/` directory. This approach:
-- Ensures CI reproducibility (same keys every time)
-- Speeds up test execution (no key generation overhead)
-- Simplifies the test infrastructure
-
-**Note:** These are test-only keys and should never be used in production.
+All test configurations embed keys directly:
+- No template substitution
+- No key generation at runtime
+- Keys are test-only and publicly available
+- Each node uses same port (9000) since they're in different namespaces
 
 ## Test Suites
 
@@ -126,19 +122,24 @@ Tests that L2 and L3 tunnels cannot connect to each other.
 
 - Linux with network namespace support
 - `sudo` access for creating network namespaces
-- `unshare` command from util-linux (for PID namespace support)
+- `gcc` for compiling the test runner
 - Rust nightly toolchain (nightly-2026-01-18 or compatible)
 - `ip` command from iproute2
 - `/dev/net/tun` device for TUN/TAP support
-- **Important**: Full network namespace support with UDP socket permissions
 
 ## Running Tests
 
 ### Build the project first
 ```bash
 cd rust
-rustup default nightly-2026-01-18  # Or compatible nightly version
+rustup default nightly-2026-01-18
 cargo build --release
+```
+
+### Build the test runner
+```bash
+cd rust/test
+make
 ```
 
 ### Run all test suites
@@ -157,82 +158,23 @@ sudo bash l2-l3-incompatible/run.sh  # L2-L3 incompatibility
 
 ## Environment Variables
 
-### Test Driver
-- `WORK_DIR` - Working directory for configs and logs (default: `../run`)
 - `KQT_BIN` - Path to kqt binary (default: `../../target/release/kqt`)
-- `NS1`, `NS2` - Network namespace names (defaults: `kqt-test-ns1`, `kqt-test-ns2`)
-- `VETH1`, `VETH2` - veth interface names (defaults: `veth1`, `veth2`)
-- `NODE1_LISTEN_PORT` - Port for node1 (default: 9001)
-- `NODE2_LISTEN_PORT` - Port for node2 (default: 9002)
 
-### Example: Custom ports and namespaces
+### Example: Custom binary path
 ```bash
-NODE1_LISTEN_PORT=10001 NODE2_LISTEN_PORT=10002 \
-NS1=my-ns1 NS2=my-ns2 \
-sudo bash l2/run.sh
+export KQT_BIN=/path/to/kqt
+sudo -E bash l2/run.sh
 ```
 
-## Configuration Templates
+## Test Execution Flow
 
-Configuration files in each test directory are templates with placeholders:
-- `{CA_PUBLIC}` - CA public certificate
-- `{NODE1_PRIVATE}` - Node 1 private key
-- `{NODE2_PRIVATE}` - Node 2 private key
-- `{NODE1_LISTEN_PORT}` - Node 1 listen port
-- `{NODE2_LISTEN_PORT}` - Node 2 listen port
-
-The test driver automatically replaces these placeholders when generating configs.
-
-## Test Logs
-
-Test logs are saved to `run/` directory:
-- `run/node1.log` - Node 1 output
-- `run/node2.log` - Node 2 output
-- `run/node1.toml` - Generated node 1 config
-- `run/node2.toml` - Generated node 2 config
-- `run/*.txt`, `run/*.cert` - Generated keys and certificates
-
-## Cleanup
-
-The test driver automatically cleans up:
-- Network namespaces (deleted on exit)
-- veth interfaces (deleted with namespaces)
-- kqt processes (terminated on exit)
-
-Working directory (`run/`) is preserved for debugging but can be manually deleted:
-```bash
-rm -rf run/
-```
-
-## Adding New Tests
-
-To add a new test suite:
-
-1. Create a new directory under `test/`
-2. Add config templates (node1.toml, node2.toml)
-3. Create a test script (e.g., test-mytest.sh)
-4. Create a runner script (run.sh) that calls test-driver.sh
-5. Add to run-all.sh to include in full test suite
-
-Example structure:
-```
-test/my-new-test/
-├── node1.toml           # Config template
-├── node2.toml           # Config template
-├── test-mytest.sh       # Test script
-└── run.sh               # Runner
-```
+1. Runner script calls C test runner with config files and test script
+2. C runner checks if PID 1, relaunches in PID namespace if not
+3. Creates network namespaces and veth pairs
+4. Starts kqt nodes in their respective namespaces
+5. Executes test script in node1's namespace
+6. Cleans up all resources on exit
 
 ## Known Limitations
 
 Some container or sandbox environments may block UDP socket operations with "Operation not permitted" errors. The tests are designed to handle this gracefully and will report it as a limitation rather than a failure.
-
-## Migration from Old Tests
-
-The old test infrastructure in `tests/` directory has been replaced by this new modular infrastructure. Key improvements:
-
-1. **Separated concerns**: Configuration templates separate from test logic
-2. **Reusable driver**: Common test driver for all test suites
-3. **Modular tests**: Easy to add new test scenarios
-4. **Better cleanup**: Reliable process and namespace cleanup
-5. **Better organization**: Clear directory structure for different test types

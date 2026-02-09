@@ -1,7 +1,7 @@
 #!/bin/bash
 # L2-L3 incompatibility test script
 # Tests that L2 tunnel should not connect to L3 tunnel
-# The internal connection should fail to connect, but nodes should not exit
+# Runs in the context of node1's network namespace
 
 set -e
 
@@ -17,10 +17,10 @@ echo ""
 # Step 1: Check TUN/TAP device creation
 echo -e "${YELLOW}Test 1: Checking TUN/TAP device creation...${NC}"
 
-if sudo ip netns exec "$NS1" ip link show kqt0 > /dev/null 2>&1; then
-    echo -e "${GREEN}✓ TUN device kqt0 created in $NS1 (L2 mode)${NC}"
+if ip link show kqt0 > /dev/null 2>&1; then
+    echo -e "${GREEN}✓ TUN device kqt0 created in this namespace (L2 mode)${NC}"
 else
-    echo -e "${RED}✗ TUN device kqt0 not found in $NS1${NC}"
+    echo -e "${RED}✗ TUN device kqt0 not found${NC}"
     exit 1
 fi
 
@@ -37,43 +37,29 @@ echo "Waiting for connection attempts..."
 sleep 8
 echo ""
 
-# Step 2: Verify nodes are still running
+# Step 2: Verify nodes are still running by checking TUN devices still exist
 echo -e "${YELLOW}Test 2: Verifying nodes are still running...${NC}"
 
-# Check node logs exist
-if [ ! -f "$WORK_DIR/node1.log" ] || [ ! -f "$WORK_DIR/node2.log" ]; then
-    echo -e "${RED}✗ Log files not found${NC}"
+if ip link show kqt0 > /dev/null 2>&1; then
+    echo -e "${GREEN}✓ Node 1 still running (TUN device exists)${NC}"
+else
+    echo -e "${RED}✗ Node 1 appears to have exited${NC}"
     exit 1
 fi
 
-# Display log excerpts to show connection failures
-echo "Node1 log excerpt (last 20 lines):"
-tail -n 20 "$WORK_DIR/node1.log"
-echo ""
-
-echo "Node2 log excerpt (last 20 lines):"
-tail -n 20 "$WORK_DIR/node2.log"
-echo ""
-
-# Check if logs contain expected failure messages
-# The exact error message may vary, so we'll look for general connection/handshake issues
-echo -e "${YELLOW}Test 3: Checking for connection failure indicators...${NC}"
-
-# Look for any indication that the connection failed or handshake failed
-# We expect to see errors related to incompatible modes or failed connections
-if grep -qi "error\|failed\|reject\|incompatible\|mismatch" "$WORK_DIR/node1.log" "$WORK_DIR/node2.log"; then
-    echo -e "${GREEN}✓ Connection failures detected in logs (expected behavior)${NC}"
+if sudo ip netns exec "$NS2" ip link show kqt0 > /dev/null 2>&1; then
+    echo -e "${GREEN}✓ Node 2 still running (TUN device exists)${NC}"
 else
-    echo -e "${YELLOW}⚠ No obvious connection failure messages found in logs${NC}"
-    echo -e "${YELLOW}  This might still be correct if connections are silently rejected${NC}"
+    echo -e "${RED}✗ Node 2 appears to have exited${NC}"
+    exit 1
 fi
 echo ""
 
-# Step 4: Verify that connectivity does NOT work
-echo -e "${YELLOW}Test 4: Verifying that connectivity does NOT work (expected)...${NC}"
+# Step 3: Verify that connectivity does NOT work
+echo -e "${YELLOW}Test 3: Verifying that connectivity does NOT work (expected)...${NC}"
 
 # Try to ping - this should fail
-PING_OUTPUT=$(sudo ip netns exec "$NS1" ping -c 2 -W 3 10.21.0.2 2>&1 || true)
+PING_OUTPUT=$(ping -c 2 -W 3 10.21.0.2 2>&1 || true)
 echo "$PING_OUTPUT"
 
 if echo "$PING_OUTPUT" | grep -q " received"; then
