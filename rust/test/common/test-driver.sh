@@ -154,6 +154,7 @@ mkdir -p "$WORK_DIR"
 
 # Step 1: Copy pre-generated test keys from fixtures
 # We use pre-generated keys to ensure CI reproducibility and avoid generating keys on the fly
+# WARNING: These are TEST-ONLY keys from fixtures/ directory - NEVER use in production!
 echo -e "${YELLOW}Step 1: Setting up test keys...${NC}"
 
 FIXTURES_DIR="$TEST_DIR/fixtures"
@@ -163,7 +164,7 @@ if [ ! -f "$FIXTURES_DIR/ca-private.txt" ]; then
     exit 1
 fi
 
-# Copy keys to working directory
+# Copy TEST-ONLY keys to working directory
 cp "$FIXTURES_DIR/ca-private.txt" "$WORK_DIR/"
 cp "$FIXTURES_DIR/ca-public.cert" "$WORK_DIR/"
 cp "$FIXTURES_DIR/node1-private.txt" "$WORK_DIR/"
@@ -171,7 +172,7 @@ cp "$FIXTURES_DIR/node1-public.cert" "$WORK_DIR/"
 cp "$FIXTURES_DIR/node2-private.txt" "$WORK_DIR/"
 cp "$FIXTURES_DIR/node2-public.cert" "$WORK_DIR/"
 
-echo "Test keys copied from fixtures"
+echo "Test keys copied from fixtures (TEST ONLY - not for production)"
 echo ""
 
 # Step 2: Generate configs from templates
