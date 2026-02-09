@@ -1,3 +1,6 @@
 /target
 /certs
 test.*.toml
+
+# Test artifacts
+test/run/

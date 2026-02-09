@@ -1,12 +1,23 @@
-# KQT Integration Tests
+# KQT Integration Tests (Legacy)
 
-This directory contains integration tests for the kqt Rust implementation.
+**⚠️ NOTICE: This directory contains legacy test scripts for backward compatibility.**
 
-## Test Scripts
+**The new modular test infrastructure is located in: `../test/`**
+
+For new development and testing, please use the new infrastructure which provides:
+- Separated configuration templates
+- Modular test suites (L2, L3, L2-L3 incompatibility)
+- Reusable test driver
+- Better cleanup and process management
+
+See `../test/README.md` for full documentation.
+
+## Legacy Test Scripts
 
 - **generate-keys.sh** - Generates CA and node keypairs for testing (string format only)
 - **generate-configs.sh** - Generates TOML configuration files for test nodes. Takes optional MODE parameter (L2 or L3)
 - **integration-test.sh** - Main integration test script that sets up network namespaces and runs connectivity tests
+- **integration-test-new.sh** - Wrapper that calls the new test infrastructure
 
 ## Requirements
 
@@ -25,7 +36,16 @@ The integration tests require full network namespace support including the abili
 
 If you encounter these limitations, you can still verify the build and basic functionality, but full integration tests will need to run on a system with unrestricted network namespace support.
 
-## Running Tests Locally
+## Using the New Test Infrastructure (Recommended)
+
+```bash
+cd ../test
+sudo bash run-all.sh
+```
+
+See `../test/README.md` for more information.
+
+## Running Legacy Tests
 
 1. Build the project:
    ```bash
