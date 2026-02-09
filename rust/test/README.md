@@ -40,23 +40,30 @@ test/
 
 The test driver (`common/test-driver.sh`) provides:
 
-1. **Network Namespace Management**
+1. **PID Namespace Isolation**
+   - Automatically launches in a PID namespace using `unshare --pid --fork --kill-child`
+   - Runs as PID 1 within the namespace for proper process management
+   - All child processes are automatically killed when the driver exits
+   - Prevents resource leaks in network namespaces
+   - Ensures reliable cleanup even on abnormal termination (SIGKILL, SIGTERM, etc.)
+
+2. **Network Namespace Management**
    - Creates isolated network namespaces for each node
    - Automatically cleans up namespaces on exit
    - No persistent bindings (namespaces deleted after test)
 
-2. **Veth Pair Creation**
+3. **Veth Pair Creation**
    - Creates virtual ethernet pairs to connect namespaces
    - Configures IP addresses (10.0.0.1/24 and 10.0.0.2/24)
    - Brings up interfaces automatically
 
-3. **Process Management**
+4. **Process Management**
    - Starts kqt nodes in their respective namespaces
-   - Tracks process IDs for cleanup
-   - Ensures all child processes are terminated on exit
+   - Tracks process IDs for debugging
    - Handles cleanup on any exit signal (normal, interrupt, or error)
+   - Child processes inherit proper signal handling from PID namespace
 
-4. **Configuration Management**
+5. **Configuration Management**
    - Generates keys using common/generate-keys.sh
    - Replaces placeholders in config templates with actual keys
    - Creates working configs in run/ directory
@@ -99,6 +106,7 @@ Tests that L2 and L3 tunnels cannot connect to each other.
 
 - Linux with network namespace support
 - `sudo` access for creating network namespaces
+- `unshare` command from util-linux (for PID namespace support)
 - Rust nightly toolchain (nightly-2026-01-18 or compatible)
 - `ip` command from iproute2
 - `/dev/net/tun` device for TUN/TAP support

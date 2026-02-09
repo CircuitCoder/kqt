@@ -12,7 +12,32 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Configuration
+# Check if we need to relaunch in a PID namespace
+# If we're not PID 1, relaunch ourselves in a PID namespace using unshare
+if [ $$ -ne 1 ]; then
+    # Check if unshare is available
+    if ! command -v unshare >/dev/null 2>&1; then
+        echo -e "${RED}Error: unshare command not found${NC}"
+        echo "PID namespace support requires unshare from util-linux"
+        exit 1
+    fi
+    
+    # Get absolute path to this script before exec
+    SCRIPT_PATH="$(readlink -f "$0")"
+    
+    # Relaunch in PID namespace with --kill-child to ensure all children are killed
+    # when this script exits. This prevents resource leaks in network namespaces.
+    # --pid creates a new PID namespace
+    # --fork forks a child process that becomes PID 1 in the new namespace
+    # --kill-child sends SIGKILL to all children when unshare exits
+    # --mount-proc mounts /proc in the new namespace (required for PID namespace)
+    exec unshare --pid --fork --kill-child --mount-proc "$SCRIPT_PATH" "$@"
+fi
+
+# We are now PID 1 in a PID namespace
+# All child processes will be automatically killed when we exit
+
+# Configuration - now we can safely determine paths
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TEST_DIR="${SCRIPT_DIR}/.."
 WORK_DIR="${WORK_DIR:-$TEST_DIR/run}"
@@ -51,8 +76,9 @@ if [ $# -lt 2 ]; then
     usage
 fi
 
-CONFIG_DIR="$1"
-TEST_SCRIPT="$2"
+# Convert arguments to absolute paths before we proceed
+CONFIG_DIR="$(readlink -f "$1")"
+TEST_SCRIPT="$(readlink -f "$2")"
 
 # Validate inputs
 if [ ! -d "$CONFIG_DIR" ]; then
@@ -78,21 +104,20 @@ if [ ! -f "$KQT_BIN" ]; then
 fi
 
 # Cleanup function
+# Since we're running as PID 1 in a PID namespace, all child processes
+# will be automatically killed when we exit (thanks to --kill-child).
+# We only need to clean up network namespaces.
 cleanup() {
     local exit_code=$?
     echo -e "${YELLOW}Cleaning up...${NC}"
     
-    # Kill any running kqt processes by PID if they exist
-    if [ -n "$NODE1_PID" ] && ps -p "$NODE1_PID" > /dev/null 2>&1; then
-        sudo kill "$NODE1_PID" 2>/dev/null || true
-        sleep 0.5
-    fi
-    if [ -n "$NODE2_PID" ] && ps -p "$NODE2_PID" > /dev/null 2>&1; then
-        sudo kill "$NODE2_PID" 2>/dev/null || true
-        sleep 0.5
-    fi
+    # All child processes (including kqt nodes) will be automatically killed
+    # by the PID namespace when we exit, so we don't need to manually kill them.
+    # Just give them a moment to terminate gracefully.
+    sleep 0.5
     
     # Delete network namespaces (this also deletes veth interfaces)
+    # These need to be cleaned up explicitly as they're created in the parent namespace
     sudo ip netns del "$NS1" 2>/dev/null || true
     sudo ip netns del "$NS2" 2>/dev/null || true
     
