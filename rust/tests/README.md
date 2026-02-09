@@ -1,23 +1,47 @@
-# KQT Integration Tests (Legacy)
+# KQT Integration Tests (Legacy - DEPRECATED)
 
-**⚠️ NOTICE: This directory contains legacy test scripts for backward compatibility.**
+**⚠️ THIS DIRECTORY IS DEPRECATED**
 
-**The new modular test infrastructure is located in: `../test/`**
+**Please use the new test infrastructure located in: `../test/`**
 
-For new development and testing, please use the new infrastructure which provides:
-- Separated configuration templates
+The new infrastructure provides:
+- Pre-generated test keys (no key generation on the fly)
 - Modular test suites (L2, L3, L2-L3 incompatibility)
+- PID namespace support for proper cleanup
 - Reusable test driver
-- Better cleanup and process management
+- Better process management
 
 See `../test/README.md` for full documentation.
 
 ## Legacy Test Scripts
 
-- **generate-keys.sh** - Generates CA and node keypairs for testing (string format only)
-- **generate-configs.sh** - Generates TOML configuration files for test nodes. Takes optional MODE parameter (L2 or L3)
-- **integration-test.sh** - Main integration test script that sets up network namespaces and runs connectivity tests
-- **integration-test-new.sh** - Wrapper that calls the new test infrastructure
+This directory contains a legacy compatibility wrapper:
+
+- **integration-test-new.sh** - Wrapper that calls the new test infrastructure (use this for backward compatibility)
+
+## Migration Guide
+
+If you were using the old test scripts:
+
+**Old way (deprecated):**
+```bash
+cd rust/tests
+bash generate-keys.sh run
+bash generate-configs.sh run L2
+sudo bash integration-test.sh
+```
+
+**New way:**
+```bash
+cd rust/test
+sudo bash run-all.sh
+# Or run individual suites:
+sudo bash l2/run.sh
+sudo bash l3/run.sh
+sudo bash l2-l3-incompatible/run.sh
+```
+
+The new infrastructure uses pre-generated keys from `../test/fixtures/` and does not require manual key generation.
 
 ## Requirements
 

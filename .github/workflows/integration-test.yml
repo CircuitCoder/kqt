@@ -9,13 +9,10 @@ on:
 
 jobs:
   integration-test:
-    name: Integration Tests (${{ matrix.mode }})
+    name: Integration Tests
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    strategy:
-      matrix:
-        mode: [L2, L3]
 
     steps:
       - name: Checkout code
@@ -35,40 +32,19 @@ jobs:
         working-directory: ./rust
         run: cargo build --bin kqt --release --verbose
 
-      - name: Generate certificates
-        working-directory: ./rust/tests
-        run: |
-          # Set KQT_BIN to the built binary
-          export KQT_BIN="$(pwd)/../target/release/kqt"
-          
-          # Create work directory
-          mkdir -p run
-          
-          # Generate certificates
-          bash generate-keys.sh run
-
-      - name: Generate configurations
-        working-directory: ./rust/tests
-        run: |
-          # Set KQT_BIN to the built binary
-          export KQT_BIN="$(pwd)/../target/release/kqt"
-          
-          # Generate configurations
-          bash generate-configs.sh run ${{ matrix.mode }}
-
       - name: Run integration tests
-        working-directory: ./rust/tests
+        working-directory: ./rust/test
         run: |
           # Set KQT_BIN to the built binary
           export KQT_BIN="$(pwd)/../target/release/kqt"
           
-          # Run the integration test with sudo
-          sudo -E bash integration-test.sh
+          # Run all test suites with sudo
+          sudo -E bash run-all.sh
 
       - name: Upload test logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: test-logs-${{ matrix.mode }}
-          path: rust/tests/run/*.log
+          name: test-logs
+          path: rust/test/run/*.log
           if-no-files-found: ignore

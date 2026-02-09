@@ -5,18 +5,29 @@ This directory contains the new modular integration test infrastructure for the 
 ## Overview
 
 The test infrastructure is organized into:
+- **Pre-generated test fixtures**: Keys and certificates stored in fixtures/ directory
 - **Configuration templates**: Stored in test-specific subdirectories (l2/, l3/, etc.)
 - **Test driver**: Common infrastructure for network namespace setup and teardown
 - **Test suites**: Individual test scripts for different scenarios
 - **Test runners**: Scripts to execute each test suite
+
+**Important:** This test infrastructure uses **pre-generated test keys** from the `fixtures/` directory. Keys are never generated on the fly to ensure CI reproducibility and faster test execution.
 
 ## Directory Structure
 
 ```
 test/
 ├── common/
-│   ├── generate-keys.sh      # Generate CA and node keypairs
+│   ├── generate-keys.sh      # Script to regenerate test fixtures (rarely needed)
 │   └── test-driver.sh         # Core test driver (netns, veth, process mgmt)
+├── fixtures/
+│   ├── ca-private.txt        # Pre-generated CA private key
+│   ├── ca-public.cert        # Pre-generated CA certificate
+│   ├── node1-private.txt     # Pre-generated node1 private key
+│   ├── node1-public.cert     # Pre-generated node1 certificate
+│   ├── node2-private.txt     # Pre-generated node2 private key
+│   ├── node2-public.cert     # Pre-generated node2 certificate
+│   └── README.md             # Fixtures documentation
 ├── l2/
 │   ├── node1.toml            # L2 mode config template for node1
 │   ├── node2.toml            # L2 mode config template for node2
@@ -64,9 +75,18 @@ The test driver (`common/test-driver.sh`) provides:
    - Child processes inherit proper signal handling from PID namespace
 
 5. **Configuration Management**
-   - Generates keys using common/generate-keys.sh
+   - Uses pre-generated keys from fixtures/ directory (never generates on the fly)
    - Replaces placeholders in config templates with actual keys
    - Creates working configs in run/ directory
+
+## Test Fixtures
+
+Test keys and certificates are pre-generated and stored in the `fixtures/` directory. This approach:
+- Ensures CI reproducibility (same keys every time)
+- Speeds up test execution (no key generation overhead)
+- Simplifies the test infrastructure
+
+**Note:** These are test-only keys and should never be used in production.
 
 ## Test Suites
 

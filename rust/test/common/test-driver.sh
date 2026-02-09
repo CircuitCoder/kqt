@@ -152,15 +152,27 @@ fi
 # Create working directory
 mkdir -p "$WORK_DIR"
 
-# Step 1: Generate keys (if not already present)
-if [ ! -f "$WORK_DIR/ca-private.txt" ]; then
-    echo -e "${YELLOW}Step 1: Generating CA and keypairs...${NC}"
-    bash "$SCRIPT_DIR/../common/generate-keys.sh" "$WORK_DIR"
-    echo ""
-else
-    echo -e "${YELLOW}Step 1: Using existing CA and keypairs...${NC}"
-    echo ""
+# Step 1: Copy pre-generated test keys from fixtures
+# We use pre-generated keys to ensure CI reproducibility and avoid generating keys on the fly
+echo -e "${YELLOW}Step 1: Setting up test keys...${NC}"
+
+FIXTURES_DIR="$TEST_DIR/fixtures"
+if [ ! -f "$FIXTURES_DIR/ca-private.txt" ]; then
+    echo -e "${RED}Error: Test fixtures not found at $FIXTURES_DIR${NC}"
+    echo "Test keys must be pre-generated. Run: cd rust/test/common && bash generate-keys.sh ../fixtures"
+    exit 1
 fi
+
+# Copy keys to working directory
+cp "$FIXTURES_DIR/ca-private.txt" "$WORK_DIR/"
+cp "$FIXTURES_DIR/ca-public.cert" "$WORK_DIR/"
+cp "$FIXTURES_DIR/node1-private.txt" "$WORK_DIR/"
+cp "$FIXTURES_DIR/node1-public.cert" "$WORK_DIR/"
+cp "$FIXTURES_DIR/node2-private.txt" "$WORK_DIR/"
+cp "$FIXTURES_DIR/node2-public.cert" "$WORK_DIR/"
+
+echo "Test keys copied from fixtures"
+echo ""
 
 # Step 2: Generate configs from templates
 echo -e "${YELLOW}Step 2: Generating configuration files from templates...${NC}"
