@@ -15,6 +15,9 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
     }
 
     buildTypes {
@@ -26,6 +29,16 @@ android {
             )
         }
     }
+    
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a")
+            isUniversalApk = true
+        }
+    }
+    
     compileOptions {
         sourceCompatibility = org.gradle.api.JavaVersion.VERSION_17
         targetCompatibility = org.gradle.api.JavaVersion.VERSION_17
