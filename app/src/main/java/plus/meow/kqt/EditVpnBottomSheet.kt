@@ -23,22 +23,26 @@ import com.google.android.material.button.MaterialButton
 import com.google.android.material.textfield.TextInputEditText
 import io.github.rosemoe.sora.widget.CodeEditor
 import io.github.rosemoe.sora.widget.schemes.EditorColorScheme.WHOLE_BACKGROUND
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import plus.meow.kqt.crypto.CryptoManager
 import plus.meow.kqt.editor.TomlLanguageFactory
 import plus.meow.kqt.repository.VpnConfigRepository
 import plus.meow.kqt.storage.VpnConfigEntity
 import plus.meow.kqt.utils.Result
-import java.util.UUID
+import plus.meow.kqt.vpn.VpnState
+import plus.meow.kqt.vpn.VpnStateManager
 
 class EditVpnBottomSheet : BottomSheetDialogFragment() {
 
     private lateinit var entry: VpnConfigEntity
     private var onChanged: (() -> Unit)? = null
-    private var onToggle: ((UUID, Boolean) -> Unit)? = null
-    private var nameValidator: ((UUID, String) -> String?)? = null
+    private var onToggle: ((Boolean) -> Unit)? = null
+    private var nameValidator: ((String) -> String?)? = null
     private lateinit var repository: VpnConfigRepository
     private lateinit var cryptoManager: CryptoManager
+    private lateinit var vpnStateManager: VpnStateManager
 
     private lateinit var nameInput: TextInputEditText
     private lateinit var toggleButton: MaterialButton
@@ -50,7 +54,6 @@ class EditVpnBottomSheet : BottomSheetDialogFragment() {
     private lateinit var exportButton: MaterialButton
 
     private var draftName: String = ""
-    private var isRunning: Boolean = false
 
     // State for configuration editing
     private var decryptedConfiguration: String? = null
@@ -108,6 +111,10 @@ class EditVpnBottomSheet : BottomSheetDialogFragment() {
 
         // Setup code editor text change listener
         codeEditor.subscribeEvent(io.github.rosemoe.sora.event.ContentChangeEvent::class.java) { _, _ ->
+            if (decryptedConfiguration == codeEditor.text.toString()) {
+                // Unchanged, initial update
+                return@subscribeEvent
+            }
             decryptedConfiguration = codeEditor.text.toString()
             isConfigEdited = true
             updateSaveEnabled()
@@ -209,7 +216,14 @@ class EditVpnBottomSheet : BottomSheetDialogFragment() {
         // Initialize UI from entity data
         draftName = entry.name
         nameInput.setText(draftName)
-        toggleButton.isChecked = isRunning
+
+        // Observe VPN state for this entry
+        vpnStateManager.observe(entry.id)
+            .onEach { state ->
+                val isRunning = state !is VpnState.Disconnected
+                toggleButton.isChecked = isRunning
+            }
+            .launchIn(lifecycleScope)
 
         // Check if config exists (based on encryptedConfig field)
         val hasConfig = entry.encryptedConfig != null
@@ -236,8 +250,17 @@ class EditVpnBottomSheet : BottomSheetDialogFragment() {
             updateSaveEnabled()
         }
 
-        toggleButton.addOnCheckedChangeListener { _, checked ->
-            onToggle?.invoke(entry.id, checked)
+        toggleButton.setOnClickListener {
+            // FIXME: warn about unsaved config
+            // FIXME: listen on database change
+            // MaterialButton automatically toggles isChecked before onClick fires
+            // So toggleButton.isChecked already contains the new state
+
+            // Immediately revert to avoid inconsistent UI state if the state is synchronously
+            // changed back
+            val isChecked = toggleButton.isChecked
+            toggleButton.isChecked = !isChecked
+            onToggle?.invoke(isChecked)
         }
 
         saveButton.setOnClickListener {
@@ -248,7 +271,7 @@ class EditVpnBottomSheet : BottomSheetDialogFragment() {
     }
 
     private fun validateName(): Boolean {
-        nameInput.error = nameValidator?.invoke(entry.id, draftName)
+        nameInput.error = nameValidator?.invoke(draftName)
         return nameInput.error == null
     }
 
@@ -275,7 +298,13 @@ class EditVpnBottomSheet : BottomSheetDialogFragment() {
             }
 
             val ret = repository.update(updatedEntity)
-            if (ret is Result.Err) ret.toast(requireContext())
+            if (ret is Result.Err) {
+                ret.toast(requireContext())
+                return@launch
+            }
+
+            // Notify parent of changes
+            onChanged?.invoke()
             dismiss()
         }
     }
@@ -340,11 +369,11 @@ class EditVpnBottomSheet : BottomSheetDialogFragment() {
             mtu = 1400
             address = "LOCAL_INTERNAL_ADDR"
             
-            # mode = "L3"
+            mode = "L3"
 
             [[connect_to]]
             endpoint = "REMOTE_IP"
-            # designated_range = ["REMOTE_INTERNAL_ADDR/32"]
+            designated_range = ["REMOTE_INTERNAL_ADDR/32"]
         """.trimIndent()
         isConfigEdited = true
         updateConfigDisplay()
@@ -491,18 +520,18 @@ class EditVpnBottomSheet : BottomSheetDialogFragment() {
     companion object {
         fun newInstance(
             entity: VpnConfigEntity,
-            isRunning: Boolean,
             repository: VpnConfigRepository,
             cryptoManager: CryptoManager,
-            nameValidator: (UUID, String) -> String?,
+            vpnStateManager: VpnStateManager,
+            nameValidator: (String) -> String?,
             onChanged: () -> Unit,
-            onToggle: (UUID, Boolean) -> Unit
+            onToggle: (Boolean) -> Unit
         ): EditVpnBottomSheet {
             return EditVpnBottomSheet().apply {
                 this.entry = entity
-                this.isRunning = isRunning
                 this.repository = repository
                 this.cryptoManager = cryptoManager
+                this.vpnStateManager = vpnStateManager
                 this.nameValidator = nameValidator
                 this.onChanged = onChanged
                 this.onToggle = onToggle

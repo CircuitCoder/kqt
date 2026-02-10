@@ -2,13 +2,19 @@ package plus.meow.kqt.crypto
 
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyInfo
+import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
+import android.security.keystore.UserNotAuthenticatedException
+import androidx.biometric.BiometricPrompt
 import androidx.fragment.app.FragmentActivity
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import plus.meow.kqt.utils.Result
+import javax.crypto.SecretKeyFactory
 
 /**
  * Manages encryption/decryption using Android Keystore.
@@ -56,6 +62,29 @@ class CryptoManager(
                 return result
             }
         }
+
+        private fun doesKeyRequireAuth(key: SecretKey): Boolean {
+            try {
+                val factory = javax.crypto.SecretKeyFactory.getInstance(
+                    key.algorithm,
+                    ANDROID_KEYSTORE
+                )
+                val keyInfo = factory.getKeySpec(
+                    key,
+                    android.security.keystore.KeyInfo::class.java
+                ) as android.security.keystore.KeyInfo
+                return keyInfo.isUserAuthenticationRequired
+            } catch (e: Exception) {
+                return false;
+            }
+        }
+
+        private fun isUserNotAuthenticated(e: Throwable): Boolean {
+            if (e is UserNotAuthenticatedException) return true;
+            val cause = e.cause
+            if (cause != null) return isUserNotAuthenticated(cause);
+            return false;
+        }
     }
 
     private val keyStore: KeyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply {
@@ -68,52 +97,12 @@ class CryptoManager(
      * @return SecretKey if successful, null if authentication failed
      * @throws IllegalStateException if key doesn't exist (not provisioned)
      */
-    private suspend fun getMasterKey(): SecretKey? {
+    private fun getMasterKey(): SecretKey? {
         if (!keyStore.containsAlias(MASTER_KEY_ALIAS)) {
-            throw IllegalStateException("Master key not provisioned. Please provision a key first.")
+            return null
         }
 
         val masterKey = keyStore.getKey(MASTER_KEY_ALIAS, null) as SecretKey
-        val securityTier = provisioningManager.getSecurityTier()
-            ?: throw IllegalStateException("Security tier not configured")
-
-        // Check if we need to authenticate
-        if (securityTier.requiresAuthentication()) {
-            // Get key info to check authentication state
-            val factory = javax.crypto.SecretKeyFactory.getInstance(
-                masterKey.algorithm,
-                ANDROID_KEYSTORE
-            )
-
-            @Suppress("DEPRECATION")
-            val keyInfo = factory.getKeySpec(
-                masterKey,
-                android.security.keystore.KeyInfo::class.java
-            ) as android.security.keystore.KeyInfo
-
-            // Determine if we need to show biometric prompt
-            val needsAuth = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                // For Android 11+, check user authentication validity
-                keyInfo.isUserAuthenticationRequired
-            } else {
-                // For older versions, always require auth for every-use tiers
-                keyInfo.isUserAuthenticationRequired
-            }
-
-            if (needsAuth) {
-                // Show biometric authentication prompt
-                val authSuccess = biometricAuthManager.authenticate(
-                    title = "Authenticate",
-                    subtitle = "Access encrypted VPN configurations",
-                    description = "Authentication required to decrypt your VPN data"
-                )
-
-                if (!authSuccess) {
-                    return null // Authentication failed
-                }
-            }
-        }
-
         return masterKey
     }
 
@@ -227,6 +216,42 @@ class CryptoManager(
         }
     }
 
+    suspend fun <T> retryCrypto(c: (SecretKey) -> Cipher, op: (SecretKey, Cipher) -> T): Result<T, CryptoError> {
+        val k = getMasterKey() ?: return Result.err(CryptoError.NoMasterKey)
+        var cipher = c(k);
+        while (true) {
+            try {
+                val result = op.invoke(k, cipher)
+                return Result.Ok(result)
+            } catch (e: Exception) {
+                if (e is KeyPermanentlyInvalidatedException) {
+                    return Result.err(CryptoError.KeyInvalidated)
+                }
+
+                val doBiometric = isUserNotAuthenticated(e) or doesKeyRequireAuth(k)
+
+                if (doBiometric) {
+                    // Recreate cipher
+                    cipher = c(k);
+
+                    if (biometricAuthManager.authenticate(
+                            title = "Authenticate",
+                            subtitle = "Access encrypted VPN configurations",
+                            co = BiometricPrompt.CryptoObject(cipher),
+                        )
+                    ) {
+                        continue;
+                    } else {
+                        return Result.err(CryptoError.AuthenticationFailure)
+                    }
+                }
+
+                // We're out of idea
+                return Result.err(CryptoError.Unknown(e))
+            }
+        }
+    }
+
     /**
      * Encrypt data using AES-256-GCM.
      * May require biometric authentication depending on security tier.
@@ -235,15 +260,16 @@ class CryptoManager(
      * @return EncryptedData containing IV and ciphertext, or null if authentication failed
      * @throws javax.crypto.IllegalBlockSizeException if encryption fails
      */
-    suspend fun encrypt(plaintext: String): EncryptedData? {
-        val masterKey = getMasterKey() ?: return null
-        val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, masterKey)
-
-        val iv = cipher.iv
-        val ciphertext = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
-
-        return EncryptedData(iv, ciphertext)
+    suspend fun encrypt(plaintext: String): Result<EncryptedData, CryptoError> {
+        return retryCrypto({ k ->
+            val c = Cipher.getInstance(TRANSFORMATION)
+            c.init(Cipher.ENCRYPT_MODE, k)
+            c
+        }) { k, c ->
+            val iv = c.iv
+            val ciphertext = c.doFinal(plaintext.toByteArray(Charsets.UTF_8))
+            EncryptedData(iv, ciphertext)
+        }
     }
 
     /**
@@ -254,24 +280,30 @@ class CryptoManager(
      * @return Decrypted plaintext string, or null if authentication failed
      * @throws javax.crypto.AEADBadTagException if data has been tampered with
      */
-    suspend fun decrypt(encryptedData: EncryptedData): String? {
-        val masterKey = getMasterKey() ?: return null
-        val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.DECRYPT_MODE, masterKey, GCMParameterSpec(GCM_TAG_LENGTH, encryptedData.iv))
-
-        val plaintext = cipher.doFinal(encryptedData.ciphertext)
-        return String(plaintext, Charsets.UTF_8)
+    suspend fun decrypt(encryptedData: EncryptedData): Result<String, CryptoError> {
+        return retryCrypto({ k->
+            val c = Cipher.getInstance(TRANSFORMATION)
+            c.init(
+                Cipher.DECRYPT_MODE,
+                k,
+                GCMParameterSpec(GCM_TAG_LENGTH, encryptedData.iv)
+            )
+            c
+        }) { k, c ->
+            val plaintext = c.doFinal(encryptedData.ciphertext)
+            String(plaintext, Charsets.UTF_8)
+        }
     }
 
     /**
      * Decrypt data with nullable IV and ciphertext arrays.
      * Returns null if either parameter is null or if authentication failed.
      */
-    suspend fun decrypt(iv: ByteArray?, ciphertext: ByteArray?): String? {
+    suspend fun decrypt(iv: ByteArray?, ciphertext: ByteArray?): Result<String?, CryptoError> {
         if (iv == null || ciphertext == null) {
-            return null
+            return Result.Ok(null)
         }
-        return decrypt(EncryptedData(iv, ciphertext))
+        return decrypt(EncryptedData(iv, ciphertext)).map { it }
     }
 
     /**
@@ -292,3 +324,23 @@ class CryptoManager(
     }
 }
 
+/**
+ * Error type for crypto operations.
+ */
+sealed class CryptoError {
+    object NoMasterKey : CryptoError() {
+        override fun toString() = "No master key found"
+    }
+
+    object KeyInvalidated : CryptoError() {
+        override fun toString() = "Master key has been invalidated\nPlease reset the storage"
+    }
+
+    object AuthenticationFailure : CryptoError() {
+        override fun toString() = "Authentication failed"
+    }
+
+    data class Unknown(val exception: Exception) : CryptoError() {
+        override fun toString() = "Unknown crypto error: " + exception.message
+    }
+}

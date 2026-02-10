@@ -6,7 +6,8 @@ import plus.meow.kqt.storage.VpnConfigDao
 import plus.meow.kqt.storage.VpnConfigEntity
 import plus.meow.kqt.storage.VpnConfigMetadata
 import plus.meow.kqt.utils.Result
-import java.util.UUID
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 /**
  * Repository for VPN configuration storage with encryption.
@@ -45,24 +46,11 @@ class VpnConfigRepository(
     }
 
     /**
-     * Create a new VPN configuration from a pre-built entity.
-     * Entity creation (including encryption) should be done by the caller.
-     */
-    suspend fun create(entity: VpnConfigEntity): Result<UUID, DatabaseError> = withContext(Dispatchers.IO) {
-        try {
-            dao.insert(entity)
-            Result.ok(entity.id)
-        } catch (e: Exception) {
-            Result.err(DatabaseError("Failed to insert entity: ${e.message}", e))
-        }
-    }
-
-    /**
      * Create a new empty VPN configuration.
      */
-    suspend fun createEmpty(name: String): Result<UUID, DatabaseError> = withContext(Dispatchers.IO) {
+    suspend fun createEmpty(name: String): Result<VpnConfigEntity, DatabaseError> = withContext(Dispatchers.IO) {
         try {
-            val id = UUID.randomUUID()
+            val id = Uuid.generateV7()
             val entity = VpnConfigEntity(
                 id = id,
                 name = name,
@@ -70,7 +58,7 @@ class VpnConfigRepository(
                 iv = null
             )
             dao.insert(entity)
-            Result.ok(id)
+            Result.ok(entity)
         } catch (e: Exception) {
             Result.err(DatabaseError("Failed to create empty config: ${e.message}", e))
         }
@@ -79,7 +67,7 @@ class VpnConfigRepository(
     /**
      * Delete a VPN configuration.
      */
-    suspend fun delete(id: UUID): Result<Unit, DatabaseError> = withContext(Dispatchers.IO) {
+    suspend fun delete(id: Uuid): Result<Unit, DatabaseError> = withContext(Dispatchers.IO) {
         try {
             dao.deleteById(id)
             Result.ok(Unit)
@@ -91,7 +79,7 @@ class VpnConfigRepository(
     /**
      * Get metadata for a specific VPN configuration.
      */
-    suspend fun getMetadata(id: UUID): Result<VpnConfigMetadata, DatabaseError> = withContext(Dispatchers.IO) {
+    suspend fun getMetadata(id: Uuid): Result<VpnConfigMetadata, DatabaseError> = withContext(Dispatchers.IO) {
         try {
             val entity = dao.getById(id)
                 ?: return@withContext Result.err(DatabaseError("VPN configuration not found"))

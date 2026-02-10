@@ -13,7 +13,6 @@ import kotlin.coroutines.resume
  */
 class BiometricAuthManager(private val activity: FragmentActivity) {
 
-
     /**
      * Check if biometric authentication is available on this device.
      */
@@ -36,10 +35,13 @@ class BiometricAuthManager(private val activity: FragmentActivity) {
      * @param description Optional description
      * @return true if authentication succeeded, false otherwise
      */
+
+    // FIXME: allow caller to disable credentials
     suspend fun authenticate(
         title: String,
         subtitle: String? = null,
-        description: String? = null
+        description: String? = null,
+        co: BiometricPrompt.CryptoObject? = null,
     ): Boolean = suspendCancellableCoroutine { continuation ->
         val executor = ContextCompat.getMainExecutor(activity)
 
@@ -57,12 +59,7 @@ class BiometricAuthManager(private val activity: FragmentActivity) {
                     Toast.makeText(activity, errString.toString(), Toast.LENGTH_SHORT).show()
                     continuation.resume(false)
                 }
-
-                override fun onAuthenticationFailed() {
-                    super.onAuthenticationFailed()
-                    Toast.makeText(activity, "Authentication failed", Toast.LENGTH_SHORT).show()
-                    continuation.resume(false)
-                }
+                // Don't handle failed, user may retry
             }
         )
 
@@ -78,7 +75,8 @@ class BiometricAuthManager(private val activity: FragmentActivity) {
             )
             .build()
 
-        biometricPrompt.authenticate(promptInfo)
+        if (co != null) biometricPrompt.authenticate(promptInfo, co)
+        else biometricPrompt.authenticate(promptInfo)
 
         continuation.invokeOnCancellation {
             biometricPrompt.cancelAuthentication()

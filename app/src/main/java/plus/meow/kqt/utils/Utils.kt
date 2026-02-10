@@ -59,6 +59,13 @@ sealed class Result<T, E> {
         }
     }
 
+    inline fun unwrapOrElse(f: (E) -> T): T {
+        return when (this) {
+            is Ok -> value
+            is Err -> f(error)
+        }
+    }
+
     /**
      * Get the success value or null if error.
      */

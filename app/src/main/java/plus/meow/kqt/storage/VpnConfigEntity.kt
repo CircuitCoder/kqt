@@ -2,14 +2,15 @@ package plus.meow.kqt.storage
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import plus.meow.kqt.crypto.CryptoError
 import plus.meow.kqt.crypto.CryptoManager
 import plus.meow.kqt.utils.Result
-import java.util.UUID
+import kotlin.uuid.Uuid
 
 /**
  * Room entity representing a VPN configuration.
  *
- * @property id Unique identifier (randomly generated UUID)
+ * @property id Unique identifier (UUIDv7 for time-ordered sorting)
  * @property name Human-readable name (stored in plaintext)
  * @property encryptedConfig Encrypted configuration data (AES-256-GCM), null if not yet configured
  * @property iv Initialization vector for GCM (12 bytes), null if not yet configured
@@ -17,7 +18,7 @@ import java.util.UUID
 @Entity(tableName = "vpn_configs")
 data class VpnConfigEntity(
     @PrimaryKey
-    val id: UUID,
+    val id: Uuid,
     val name: String,
     val encryptedConfig: ByteArray?,
     val iv: ByteArray?
@@ -54,23 +55,6 @@ data class VpnConfigEntity(
     }
 
     /**
-     * Error type for crypto operations.
-     */
-    sealed class CryptoError {
-        object AuthenticationRequired : CryptoError() {
-            override fun toString() = "Biometric authentication required"
-        }
-
-        object AuthenticationFailure : CryptoError() {
-            override fun toString() = "Authentication failed or was rejected by user"
-        }
-
-        data class Failed(val message: String, val exception: Exception? = null) : CryptoError() {
-            override fun toString() = "Crypto error: $message"
-        }
-    }
-
-    /**
      * Decrypt the configuration data.
      *
      * @param cryptoManager The crypto manager to use for decryption
@@ -78,17 +62,7 @@ data class VpnConfigEntity(
      *         Result.Err with CryptoError if authentication failed or decryption failed
      */
     suspend fun decryptConfig(cryptoManager: CryptoManager): Result<String?, CryptoError> {
-        return try {
-            val decrypted = cryptoManager.decrypt(iv, encryptedConfig)
-            if (decrypted == null) {
-                // Authentication failed
-                Result.err(CryptoError.AuthenticationFailure)
-            } else {
-                Result.ok(decrypted)
-            }
-        } catch (e: Exception) {
-            Result.err(CryptoError.Failed("Failed to decrypt config: ${e.message}", e))
-        }
+        return cryptoManager.decrypt(iv, encryptedConfig)
     }
 
     /**
@@ -105,27 +79,19 @@ data class VpnConfigEntity(
         newConfig: String,
         cryptoManager: CryptoManager
     ): Result<VpnConfigEntity, CryptoError> {
-        return try {
-            val encrypted = cryptoManager.encrypt(newConfig)
-            if (encrypted == null) {
-                // Authentication failed
-                return Result.err(CryptoError.AuthenticationFailure)
+        return cryptoManager.encrypt(newConfig).map { encrypted ->
+                this.copy(
+                    name = newName,
+                    encryptedConfig = encrypted.ciphertext,
+                    iv = encrypted.iv
+                )
             }
-            val updated = this.copy(
-                name = newName,
-                encryptedConfig = encrypted.ciphertext,
-                iv = encrypted.iv
-            )
-            Result.ok(updated)
-        } catch (e: Exception) {
-            Result.err(CryptoError.Failed("Failed to update entity: ${e.message}", e))
-        }
     }
 
     companion object {
         /**
          * Create a new VPN configuration entity with encrypted config.
-         * Generates a new UUID automatically.
+         * Generates a new UUIDv7 automatically for time-ordered sorting.
          *
          * @param name The human-readable name
          * @param config The configuration string to encrypt (null for no config)
@@ -138,28 +104,18 @@ data class VpnConfigEntity(
             config: String?,
             cryptoManager: CryptoManager
         ): Result<VpnConfigEntity, CryptoError> {
-            return try {
-                val (encryptedConfig, iv) = if (config != null) {
-                    val encrypted = cryptoManager.encrypt(config)
-                    if (encrypted == null) {
-                        // Authentication failed
-                        return Result.err(CryptoError.AuthenticationFailure)
-                    }
-                    encrypted.ciphertext to encrypted.iv
-                } else {
-                    null to null
-                }
+            val initial = VpnConfigEntity(
+                id = Uuid.generateV7(),
+                name = name,
+                encryptedConfig = null,
+                iv = null
+            )
 
-                val entity = VpnConfigEntity(
-                    id = UUID.randomUUID(),
-                    name = name,
-                    encryptedConfig = encryptedConfig,
-                    iv = iv
-                )
-                Result.ok(entity)
-            } catch (e: Exception) {
-                Result.err(CryptoError.Failed("Failed to create entity: ${e.message}", e))
+            if (config == null) {
+                return Result.Ok(initial)
             }
+
+            return initial.withNameAndConfig(name, config, cryptoManager)
         }
     }
 }
@@ -168,7 +124,7 @@ data class VpnConfigEntity(
  * Simple data class for listing VPN configurations without decryption.
  */
 data class VpnConfigMetadata(
-    val id: UUID,
+    val id: Uuid,
     val name: String
 )
 

@@ -55,9 +55,9 @@ class SettingsActivity : AppCompatActivity() {
     private fun showResetStorageDialog() {
         // Create styled message with bold and red "permanently delete"
         val message = "This will permanently delete:\n\n" +
-                "GÇó All VPN configurations\n" +
-                "GÇó All encryption keys\n" +
-                "GÇó All app settings\n\n" +
+                "- All VPN configurations\n" +
+                "- All encryption keys\n" +
+                "- All app settings\n\n" +
                 "This action cannot be undone. The app will close after reset."
 
         val spannableMessage = SpannableString(message)
@@ -156,7 +156,7 @@ class SettingsActivity : AppCompatActivity() {
                         .setTitle("Reset Failed - Inconsistent State")
                         .setMessage(
                             "Failed to reset storage: ${e.message}\n\n" +
-                            "GÜán+Å WARNING: App data may be in an inconsistent state.\n\n" +
+                            "Gï¿½ï¿½n+ï¿½ WARNING: App data may be in an inconsistent state.\n\n" +
                             "To fix this:\n" +
                             "1. Force stop this app\n" +
                             "2. Clear app storage manually\n" +
