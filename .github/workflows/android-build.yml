@@ -22,7 +22,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly-2026-01-18
-          targets: aarch64-linux-android
+          targets: aarch64-linux-android,armv7-linux-androideabi
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -32,9 +32,24 @@ jobs:
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked
 
-      - name: Build native library with cargo-ndk
-        working-directory: ./rust/kqt-android
-        run: cargo ndk -t arm64-v8a -o app/src/main/jniLibs/ build --release
+      - name: Build native library for arm64-v8a
+        working-directory: ./rust/kqt-kotlin
+        run: cargo ndk -t arm64-v8a build --lib --release -o ./libs
+
+      - name: Build native library for armeabi-v7a
+        working-directory: ./rust/kqt-kotlin
+        run: cargo ndk -t armeabi-v7a build --lib --release -o ./libs
+
+      - name: Copy native libraries to jniLibs
+        run: |
+          mkdir -p android/app/src/main/jniLibs/arm64-v8a
+          mkdir -p android/app/src/main/jniLibs/armeabi-v7a
+          cp rust/kqt-kotlin/libs/arm64-v8a/libkqt.so android/app/src/main/jniLibs/arm64-v8a/
+          cp rust/kqt-kotlin/libs/armeabi-v7a/libkqt.so android/app/src/main/jniLibs/armeabi-v7a/
+
+      - name: Generate Kotlin bindings with uniffi-bindgen
+        working-directory: ./rust/kqt-kotlin
+        run: cargo run --features=uniffi/cli --bin uniffi-bindgen generate --library ./libs/arm64-v8a/libkqt.so --language kotlin --out-dir ../../android/app/src/main/java/uniffi/kqt
 
       - name: Get commit SHA
         id: git-info
@@ -53,27 +68,27 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Grant execute permission for gradlew
-        working-directory: ./rust/kqt-android
+        working-directory: ./android
         run: chmod +x gradlew
 
       - name: Build debug APK
-        working-directory: ./rust/kqt-android
+        working-directory: ./android
         run: ./gradlew assembleDebug --stacktrace
 
       - name: Build release APK
-        working-directory: ./rust/kqt-android
+        working-directory: ./android
         run: ./gradlew assembleRelease --stacktrace
 
-      - name: Upload debug APK
+      - name: Upload debug APKs
         uses: actions/upload-artifact@v4
         with:
           name: kqt-android-debug-${{ steps.git-info.outputs.sha_short }}
-          path: rust/kqt-android/app/build/outputs/apk/debug/*.apk
+          path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
-      - name: Upload release APK
+      - name: Upload release APKs
         uses: actions/upload-artifact@v4
         with:
           name: kqt-android-release-${{ steps.git-info.outputs.sha_short }}
-          path: rust/kqt-android/app/build/outputs/apk/release/*.apk
+          path: android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
