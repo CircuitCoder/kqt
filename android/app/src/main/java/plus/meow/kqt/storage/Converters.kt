@@ -1,20 +1,21 @@
 package plus.meow.kqt.storage
 
 import androidx.room.TypeConverter
-import java.util.UUID
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 /**
- * Type converters for Room to handle UUID.
+ * Type converters for Room to handle Uuid.
  */
 class Converters {
     @TypeConverter
-    fun fromUUID(uuid: UUID): String {
+    fun fromUuid(uuid: Uuid): String {
         return uuid.toString()
     }
 
     @TypeConverter
-    fun toUUID(uuidString: String): UUID {
-        return UUID.fromString(uuidString)
+    fun toUuid(uuidString: String): Uuid {
+        return Uuid.parse(uuidString)
     }
 }
 

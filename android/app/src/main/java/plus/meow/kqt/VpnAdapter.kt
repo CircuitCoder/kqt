@@ -3,107 +3,92 @@ package plus.meow.kqt
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.TextView
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.materialswitch.MaterialSwitch
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import plus.meow.kqt.storage.VpnConfigEntity
-import java.util.UUID
+import plus.meow.kqt.vpn.VpnState
+import plus.meow.kqt.vpn.VpnStateManager
 
 class VpnAdapter(
+    private val lifecycleOwner: LifecycleOwner,
+    private val vpnStateManager: VpnStateManager,
     private val onEdit: (VpnConfigEntity) -> Unit,
-    private val onToggle: (UUID, Boolean) -> Unit,
+    private val onToggle: (VpnConfigEntity, Boolean) -> Unit,
 ) : ListAdapter<VpnConfigEntity, VpnAdapter.VpnViewHolder>(VpnDiffCallback()) {
-
-    private var runningId: UUID? = null
 
     init {
         setHasStableIds(true)
     }
 
-    fun updateRunningId(newRunningId: UUID?) {
-        val previousId = runningId
-        runningId = newRunningId
-
-        // Only update affected items
-        currentList.forEachIndexed { index, entry ->
-            if (entry.id == previousId || entry.id == newRunningId) {
-                notifyItemChanged(index, PAYLOAD_RUNNING)
-            }
-        }
-    }
-
-
     override fun getItemId(position: Int): Long {
         val itemId = getItem(position).id
-        return itemId.mostSignificantBits xor itemId.leastSignificantBits
+        return itemId.hashCode().toLong()
     }
 
     override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): VpnViewHolder {
         val view = LayoutInflater.from(parent.context).inflate(R.layout.item_vpn, parent, false)
-        return VpnViewHolder(view, onEdit, onToggle)
-    }
-
-    override fun onBindViewHolder(holder: VpnViewHolder, position: Int, payloads: MutableList<Any>) {
-        if (payloads.isEmpty()) {
-            onBindViewHolder(holder, position)
-            return
-        }
-
-        val entry = getItem(position)
-        val isRunning = runningId == entry.id
-        val hasConfig = entry.encryptedConfig != null
-
-        if (payloads.any { it == PAYLOAD_RUNNING }) {
-            holder.updateRunning(isRunning, hasConfig)
-        }
-        if (payloads.any { it == PAYLOAD_NAME }) {
-            holder.updateName(entry.name)
-        }
+        return VpnViewHolder(view, lifecycleOwner, vpnStateManager, onEdit, onToggle)
     }
 
     override fun onBindViewHolder(holder: VpnViewHolder, position: Int) {
         val entry = getItem(position)
-        val hasConfig = entry.encryptedConfig != null
-        holder.bind(entry, runningId == entry.id, hasConfig)
+        holder.bind(entry)
     }
 
     class VpnViewHolder(
         itemView: View,
+        private val lifecycleOwner: LifecycleOwner,
+        private val vpnStateManager: VpnStateManager,
         private val onEdit: (VpnConfigEntity) -> Unit,
-        private val onToggle: (UUID, Boolean) -> Unit,
+        private val onToggle: (VpnConfigEntity, Boolean) -> Unit,
     ) : RecyclerView.ViewHolder(itemView) {
         private val nameText = itemView.findViewById<TextView>(R.id.vpnName)
         private val toggle = itemView.findViewById<MaterialSwitch>(R.id.vpnToggle)
-        private var currentEntryId: UUID? = null
+        private var currentEntry: VpnConfigEntity? = null
+        private var stateObserverJob: kotlinx.coroutines.Job? = null
 
-        fun bind(entry: VpnConfigEntity, isRunning: Boolean, hasConfig: Boolean) {
-            currentEntryId = entry.id
+        fun bind(entry: VpnConfigEntity) {
+            // Cancel previous flow subscription if any
+            stateObserverJob?.cancel()
+
+            currentEntry = entry
+
+            // Update name
             nameText.text = entry.name
+
+            // Update click listener
             itemView.setOnClickListener { onEdit(entry) }
-            updateRunning(isRunning, hasConfig)
-        }
 
-        fun updateRunning(isRunning: Boolean, hasConfig: Boolean = true) {
-            toggle.setOnCheckedChangeListener(null)
-            toggle.isChecked = isRunning
-            toggle.isEnabled = hasConfig
-            applyToggleListener(hasConfig)
-        }
+            toggle.setOnClickListener {
+                val entry = this.currentEntry
+                if (!toggle.isEnabled or (entry == null)) return@setOnClickListener;
 
-        fun updateName(name: String) {
-            nameText.text = name
-        }
-
-        private fun applyToggleListener(hasConfig: Boolean = true) {
-            val entryId = currentEntryId ?: return
-            if (hasConfig) {
-                toggle.setOnCheckedChangeListener { _, checked ->
-                    onToggle(entryId, checked)
+                val isChecked = toggle.isChecked
+                toggle.isChecked = !isChecked
+                if (entry!!.encryptedConfig != null) {
+                    onToggle(entry, isChecked)
                 }
-            } else {
-                toggle.setOnCheckedChangeListener(null)
             }
+
+            // Observe VPN state for this entry
+            stateObserverJob = vpnStateManager.observe(entry.id)
+                .onEach { state ->
+                    val isRunning = state !is VpnState.Disconnected
+                    // Use entry from the captured scope, which is the entry we're currently bound to
+                    updateToggle(isRunning)
+                }
+                .launchIn(lifecycleOwner.lifecycleScope)
+        }
+
+        private fun updateToggle(isRunning: Boolean) {
+            toggle.isChecked = isRunning
+            toggle.isEnabled = this.currentEntry?.encryptedConfig != null
         }
     }
 
@@ -117,18 +102,6 @@ class VpnAdapter(
                    oldItem.encryptedConfig.contentEquals(newItem.encryptedConfig) &&
                    oldItem.iv.contentEquals(newItem.iv)
         }
-
-        override fun getChangePayload(oldItem: VpnConfigEntity, newItem: VpnConfigEntity): Any? {
-            return when {
-                oldItem.name != newItem.name -> PAYLOAD_NAME
-                else -> null
-            }
-        }
-    }
-
-    companion object {
-        private const val PAYLOAD_RUNNING = "payload_running"
-        private const val PAYLOAD_NAME = "payload_name"
     }
 }
 

@@ -8,13 +8,10 @@ import android.widget.RadioButton
 import android.widget.RadioGroup
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.textview.MaterialTextView
-import kotlinx.coroutines.launch
-import plus.meow.kqt.crypto.BiometricAuthManager
 import plus.meow.kqt.crypto.CryptoManager
 import plus.meow.kqt.crypto.KeyProvisioningManager
 import plus.meow.kqt.crypto.KeystoreCapabilities
@@ -39,7 +36,6 @@ class KeyProvisioningActivity : AppCompatActivity() {
 
     private lateinit var provisioningManager: KeyProvisioningManager
     private lateinit var cryptoManager: CryptoManager
-    private lateinit var biometricAuthManager: BiometricAuthManager
     private lateinit var keystoreCapabilities: KeystoreCapabilities
 
     private var selectedSecurityTier: SecurityTier = SecurityTier.TIMEOUT_5_MIN
@@ -51,7 +47,6 @@ class KeyProvisioningActivity : AppCompatActivity() {
         // Initialize managers
         provisioningManager = KeyProvisioningManager(this)
         cryptoManager = CryptoManager(this, provisioningManager)
-        biometricAuthManager = BiometricAuthManager(this)
         keystoreCapabilities = KeystoreCapabilities(this)
 
         // Bind views
@@ -74,9 +69,8 @@ class KeyProvisioningActivity : AppCompatActivity() {
         // Update description for default selection
         updateDescription(selectedSecurityTier)
 
-
         // Check if biometric is available and disable strict biometric option if not
-        if (!isBiometricAvailable()) {
+        if (!keystoreCapabilities.getCapabilities().biometric) {
             radioEveryUseBiometric.isEnabled = false
             radioEveryUseBiometric.alpha = 0.5f
         }
@@ -284,9 +278,6 @@ class KeyProvisioningActivity : AppCompatActivity() {
         return layout
     }
 
-    private fun isBiometricAvailable(): Boolean {
-        return biometricAuthManager.isBiometricAvailable()
-    }
 
     private fun onContinueClicked() {
         // Show warning for NONE tier
@@ -303,7 +294,8 @@ class KeyProvisioningActivity : AppCompatActivity() {
         }
 
         // For biometric-strict mode, check if biometric is available
-        if (selectedSecurityTier == SecurityTier.EVERY_USE_BIOMETRIC_STRICT && !isBiometricAvailable()) {
+        if (selectedSecurityTier == SecurityTier.EVERY_USE_BIOMETRIC_STRICT &&
+            !keystoreCapabilities.getCapabilities().biometric) {
             Snackbar.make(
                 continueButton,
                 "Biometric authentication is not available on this device",
@@ -312,26 +304,8 @@ class KeyProvisioningActivity : AppCompatActivity() {
             return
         }
 
-        // For other tiers that require auth, show a test authentication
-        if (selectedSecurityTier.requiresAuthentication()) {
-            showTestAuthentication()
-        } else {
-            provisionKey()
-        }
-    }
-
-    private fun showTestAuthentication() {
-        lifecycleScope.launch {
-            val success = biometricAuthManager.authenticate(
-                title = "Test Authentication",
-                subtitle = "Verify that authentication works",
-                description = "This is a one-time test to ensure your chosen security method works properly."
-            )
-
-            if (success) {
-                provisionKey()
-            }
-        }
+        // Provision the key directly - authentication will be required when using the key
+        provisionKey()
     }
 
     private fun provisionKey() {

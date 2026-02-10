@@ -27,13 +27,17 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility = org.gradle.api.JavaVersion.VERSION_17
+        targetCompatibility = org.gradle.api.JavaVersion.VERSION_17
     }
 }
 
 kotlin {
     jvmToolchain(17)
+    compilerOptions {
+        languageVersion = org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_2_3
+        freeCompilerArgs.add("-opt-in=kotlin.uuid.ExperimentalUuidApi")
+    }
 }
 
 dependencies {
@@ -49,6 +53,11 @@ dependencies {
     ksp(libs.androidx.room.compiler)
     implementation(libs.androidx.biometric)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.jna) {
+        artifact {
+            type = "aar"
+        }
+    }
     implementation(libs.sora.editor)
     implementation(libs.sora.editor.language.textmate)
     testImplementation(libs.junit)

@@ -7,7 +7,6 @@ import android.view.MenuItem
 import android.view.View
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
-import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -19,17 +18,19 @@ import plus.meow.kqt.repository.VpnConfigRepository
 import plus.meow.kqt.storage.VpnConfigDatabase
 import plus.meow.kqt.storage.VpnConfigEntity
 import plus.meow.kqt.utils.Result
-import java.util.UUID
+import plus.meow.kqt.vpn.VpnStateManager
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 class MainActivity : AppCompatActivity() {
     private val vpns = mutableListOf<VpnConfigEntity>()
-    private var runningId: UUID? = null
     private lateinit var adapter: VpnAdapter
     private lateinit var list: RecyclerView
     private lateinit var emptyStateHint: TextView
     private lateinit var provisioningManager: KeyProvisioningManager
     private lateinit var repository: VpnConfigRepository
     private lateinit var cryptoManager: CryptoManager
+    private lateinit var vpnStateManager: VpnStateManager
     private var loadEpoch: Int = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -42,6 +43,7 @@ class MainActivity : AppCompatActivity() {
         val database = VpnConfigDatabase.getInstance(this)
         cryptoManager = CryptoManager(this, provisioningManager)
         repository = VpnConfigRepository(database.vpnConfigDao())
+        vpnStateManager = VpnStateManager(this, cryptoManager)
 
         // Check if key is provisioned, if not, launch provisioning activity
         if (!provisioningManager.isProvisioned()) {
@@ -59,8 +61,10 @@ class MainActivity : AppCompatActivity() {
         list = findViewById(R.id.vpnList)
         emptyStateHint = findViewById(R.id.emptyStateHint)
         adapter = VpnAdapter(
+            lifecycleOwner = this,
+            vpnStateManager = vpnStateManager,
             onEdit = ::showEditSheet,
-            onToggle = ::setRunning
+            onToggle = ::toggleVpn,
         )
         list.layoutManager = LinearLayoutManager(this)
         list.adapter = adapter
@@ -77,31 +81,29 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadVpnList() {
         lifecycleScope.launch {
-            // Capture epoch at start
-            val currentEpoch = ++loadEpoch
-
-            // Perform all suspendable operations first
-            val allVpns = repository.listAll()
-
-            // Check if we're still the latest load
-            if (currentEpoch != loadEpoch) {
-                return@launch // Newer load started, discard this result
-            }
-
-            // Now update UI state atomically
-            vpns.clear()
-            vpns.addAll(allVpns)
-            adapter.submitList(vpns.toList())
-
-            // Clear runningId if the running VPN no longer exists
-            if (runningId != null && vpns.none { it.id == runningId }) {
-                runningId = null
-                adapter.updateRunningId(null)
-            }
-
-            // Show/hide empty state hint
-            emptyStateHint.visibility = if (vpns.isEmpty()) View.VISIBLE else View.GONE
+            loadVpnListAndWait()
         }
+    }
+
+    private suspend fun loadVpnListAndWait() {
+        // Capture epoch at start
+        val currentEpoch = ++loadEpoch
+
+        // Perform all suspendable operations first
+        val allVpns = repository.listAll()
+
+        // Check if we're still the latest load
+        if (currentEpoch != loadEpoch) {
+            return // Newer load started, discard this result
+        }
+
+        // Now update UI state atomically
+        vpns.clear()
+        vpns.addAll(allVpns)
+        adapter.submitList(vpns.toList())
+
+        // Show/hide empty state hint
+        emptyStateHint.visibility = if (vpns.isEmpty()) View.VISIBLE else View.GONE
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
@@ -132,22 +134,16 @@ class MainActivity : AppCompatActivity() {
             val uniqueName = generateUniqueName(baseName)
 
             // Create empty VPN in database
-            val newId = when (val result = repository.createEmpty(uniqueName)) {
-                is Result.Ok -> result.value
-                is Result.Err -> {
-                    result.toast(this@MainActivity)
-                    return@launch
-                }
+            val entity = repository.createEmpty(uniqueName).unwrapOrElse {
+                Result.Err<Unit, _>(it).toast(this@MainActivity)
+                return@launch
             }
-
-            // Reload the list to include the new VPN
-            loadVpnList()
 
             // Open edit sheet for the new VPN
-            val newEntry = vpns.firstOrNull { it.id == newId }
-            if (newEntry != null) {
-                showEditSheet(newEntry)
-            }
+            showEditSheet(entity)
+
+            // Fetch the newly created entry directly from the repository
+            loadVpnListAndWait()
         }
     }
 
@@ -170,12 +166,26 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun setRunning(entryId: UUID, enabled: Boolean) {
-        runningId = if (enabled) entryId else null
-        adapter.updateRunningId(runningId)
+    private fun toggleVpn(vpn: VpnConfigEntity, enabled: Boolean) {
+        lifecycleScope.launch {
+            val coro = if (enabled) {
+                vpnStateManager.connect(vpn, this@MainActivity)
+            } else {
+                vpnStateManager.disconnect(vpn.id)
+            }
+
+            coro.unwrapOrElse {
+                android.widget.Toast.makeText(
+                    this@MainActivity,
+                    "Failed to ${if (enabled) "connect" else "disconnect"}: $it",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+
+            }
+        }
     }
 
-    private fun validateVpnName(excludeId: UUID, name: String): String? {
+    private fun validateVpnName(excludeId: Uuid, name: String): String? {
         return when {
             name != name.trim() -> getString(R.string.vpn_name_empty) // Untrimmed
             name.isEmpty() -> getString(R.string.vpn_name_empty)
@@ -188,12 +198,12 @@ class MainActivity : AppCompatActivity() {
     private fun showEditSheet(entry: VpnConfigEntity) {
         val sheet = EditVpnBottomSheet.newInstance(
             entity = entry,
-            isRunning = runningId == entry.id,
             repository = repository,
             cryptoManager = cryptoManager,
-            nameValidator = ::validateVpnName,
+            vpnStateManager = vpnStateManager,
+            nameValidator = { this.validateVpnName(entry.id, it) },
             onChanged = ::loadVpnList,
-            onToggle = ::setRunning
+            onToggle = { this.toggleVpn(entry, it) }
         )
         sheet.show(supportFragmentManager, "edit_vpn")
     }
