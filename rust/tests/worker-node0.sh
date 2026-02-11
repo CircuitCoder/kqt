@@ -1,5 +1,5 @@
 #!/bin/bash
-# Worker script for node 0 (runs tests)
+# Worker script for worker 0 (runs node1 and executes tests)
 # This script runs inside a network namespace created by kqt-tester
 # KQT_TESTER_NODE environment variable is set to 0
 
@@ -23,7 +23,7 @@ if [ ! -c /dev/net/tun ]; then
     exit 1
 fi
 
-echo -e "${YELLOW}Worker 1 (node1) starting in network namespace...${NC}"
+echo -e "${YELLOW}Worker 0 (running node1) starting in network namespace...${NC}"
 
 # Start kqt node1 in background
 "$KQT_BIN" server "$WORK_DIR/node1.toml" kqt0 > "$WORK_DIR/node1.log" 2>&1 &
@@ -41,7 +41,7 @@ if ! ip link show kqt0 > /dev/null 2>&1; then
     exit 1
 fi
 
-echo -e "${GREEN}✓ TUN device kqt0 created in worker 1 (node1)${NC}"
+echo -e "${GREEN}✓ TUN device kqt0 created in worker 0 (node1)${NC}"
 
 # Wait for tunnel to establish
 echo "Waiting for tunnel to establish..."

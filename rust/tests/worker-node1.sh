@@ -1,5 +1,5 @@
 #!/bin/bash
-# Worker script for node 1 (server only)
+# Worker script for worker 1 (runs node2 as server only)
 # This script runs inside a network namespace created by kqt-tester
 # KQT_TESTER_NODE environment variable is set to 1
 
@@ -23,7 +23,7 @@ if [ ! -c /dev/net/tun ]; then
     exit 1
 fi
 
-echo -e "${YELLOW}Worker 2 (node2) starting in network namespace...${NC}"
+echo -e "${YELLOW}Worker 1 (running node2) starting in network namespace...${NC}"
 
 # Start kqt node2 in background
 "$KQT_BIN" server "$WORK_DIR/node2.toml" kqt0 > "$WORK_DIR/node2.log" 2>&1 &
@@ -41,10 +41,10 @@ if ! ip link show kqt0 > /dev/null 2>&1; then
     exit 1
 fi
 
-echo -e "${GREEN}✓ TUN device kqt0 created in worker 2 (node2)${NC}"
+echo -e "${GREEN}✓ TUN device kqt0 created in worker 1 (node2)${NC}"
 
 # Wait for up to 30 seconds for the test to complete
-echo "Worker 2 waiting for tests to complete (up to 30 seconds)..."
+echo "Worker 1 waiting for tests to complete (up to 30 seconds)..."
 for i in {1..30}; do
     if ! kill -0 $NODE_PID 2>/dev/null; then
         echo "KQT process exited"
