@@ -6,14 +6,21 @@ This directory contains integration tests for the kqt Rust implementation.
 
 - **generate-keys.sh** - Generates CA and node keypairs for testing (string format only)
 - **generate-configs.sh** - Generates TOML configuration files for test nodes. Takes optional MODE parameter (L2 or L3)
-- **integration-test.sh** - Main integration test script that sets up network namespaces and runs connectivity tests
+- **integration-test.sh** - Main integration test script that uses kqt-tester to set up network namespaces and run connectivity tests
+- **worker-node0.sh** - Worker script for node 1 (runs inside network namespace, executes tests)
+- **worker-node1.sh** - Worker script for node 2 (runs inside network namespace, server only)
+
+## Architecture
+
+The integration tests use the `kqt-tester` utility to create isolated network namespaces:
+- `kqt-tester` creates two network namespaces with a veth pair connecting them
+- Worker scripts run inside each namespace to start KQT nodes and execute tests
+- The test infrastructure handles graceful degradation in sandbox environments
 
 ## Requirements
 
 - Linux with network namespace support
-- `sudo` access for creating network namespaces
 - Rust nightly toolchain (nightly-2026-01-18 or compatible)
-- `ip` command from iproute2
 - **Important**: Full network namespace support with UDP socket permissions (may not work in restricted container/sandbox environments)
 
 ## Known Limitations
@@ -30,7 +37,7 @@ If you encounter these limitations, you can still verify the build and basic fun
 1. Build the project:
    ```bash
    cd rust
-   cargo build --release
+   cargo build --bin kqt --bin kqt-tester --release
    ```
 
 2. Run the integration test:
@@ -45,21 +52,21 @@ If you encounter these limitations, you can still verify the build and basic fun
    # Or for L3 mode
    bash generate-configs.sh run L3
    
-   # Run tests
+   # Run tests (requires sudo for network namespace creation)
    sudo bash integration-test.sh
    ```
 
    The test will:
-   - Generate CA and node certificates (string format, stored in .txt and .cert files)
-   - Create two network namespaces with a direct veth pair connection
-   - Start kqt nodes in each namespace
+   - Use kqt-tester to create isolated network namespaces with veth pair
+   - Start kqt nodes in each namespace via worker scripts
    - Verify TUN/TAP device creation
    - Run connectivity tests (IPv4 and IPv6 pings with various packet sizes)
-   - Clean up all resources
+   - Clean up automatically when worker scripts exit
 
 ## Environment Variables
 
 - `KQT_BIN` - Path to the kqt binary (default: `../target/release/kqt`)
+- `KQT_TESTER_BIN` - Path to the kqt-tester binary (default: `../target/release/kqt-tester`)
 - `WORK_DIR` - Working directory for test files (default: `./run`)
 - `NODE1_LISTEN_PORT` - Port for node1 (default: 9001)
 - `NODE2_LISTEN_PORT` - Port for node2 (default: 9002)
