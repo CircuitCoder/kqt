@@ -75,7 +75,7 @@ impl Keygen {
                 } else {
                     // Read from STDIN
                     let issuer_str = std::io::read_to_string(std::io::stdin())?;
-                    ParsedKeypair::try_from(issuer_str.as_str())?.sk
+                    ParsedKeypair::try_from(issuer_str.trim())?.sk
                 };
                 let issuer_pk = issuer_sk.verifying_key();
 

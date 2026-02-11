@@ -1,4 +1,4 @@
-use std::{net::Ipv4Addr, path::PathBuf, sync::atomic::AtomicI32, thread, time::Duration};
+use std::{net::Ipv4Addr, path::PathBuf, sync::atomic::AtomicI32};
 
 use futures::TryStreamExt;
 use rtnetlink::{LinkUnspec, LinkVeth};
