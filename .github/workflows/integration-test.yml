@@ -33,7 +33,7 @@ jobs:
 
       - name: Build release binaries
         working-directory: ./rust
-        run: cargo build --bin kqt --release --verbose
+        run: cargo build --bin kqt --bin kqt-tester --release --verbose
 
       - name: Generate certificates
         working-directory: ./rust/tests
@@ -61,6 +61,7 @@ jobs:
         run: |
           # Set KQT_BIN to the built binary
           export KQT_BIN="$(pwd)/../target/release/kqt"
+          export KQT_TESTER_BIN="$(pwd)/../target/release/kqt-tester"
           
           # Run the integration test with sudo
           sudo -E bash integration-test.sh
