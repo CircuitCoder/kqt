@@ -250,6 +250,11 @@ pub fn frag_if_needed(
     orig_frag: bool,
     extra_hdr: usize,
 ) -> anyhow::Result<&[u8]> {
+    if !ip_is_v4(&packet[extra_hdr..]) {
+        // Not IPv4, nothing to do
+        return Ok(packet);
+    }
+
     let needs_frag = packet.len() > outer_mtu;
     let final_len = if needs_frag {
         // Calculate fragment size (must be multiple of 8)
@@ -259,11 +264,6 @@ pub fn frag_if_needed(
     } else {
         packet.len()
     };
-
-    if !ip_is_v4(&packet[extra_hdr..]) {
-        // Not IPv4, nothing to do
-        return Ok(packet);
-    }
 
     use pnet_packet::ipv4::MutableIpv4Packet;
     let mut ipv4 = MutableIpv4Packet::new(&mut packet[extra_hdr..])

@@ -68,6 +68,15 @@ impl Neighboor {
     pub fn is_live(&self) -> bool {
         self.incoming.is_some() || self.outgoing.is_some()
     }
+
+    pub fn outgoing_mtu(&self) -> Option<usize> {
+        let conn = self
+            .incoming
+            .as_ref()
+            .or(self.outgoing.as_ref())?;
+
+        conn.max_datagram_size()
+    }
 }
 
 impl std::fmt::Display for Neighboor {

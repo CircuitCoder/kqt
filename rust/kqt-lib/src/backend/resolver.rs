@@ -1,10 +1,9 @@
 use std::{collections::BTreeMap, net::IpAddr, sync::Arc};
 
 use cidr::{IpInet, Ipv4Inet, Ipv6Inet};
-use ed25519_dalek::VerifyingKey;
 use tokio::sync::RwLock;
 
-use crate::{backend::{MACAddr, NodeID, SeqNo, node_id_of}, config::Mode, packet::ip_is_v4};
+use crate::{backend::{MACAddr, NodeID, SendError, SeqNo, announcer::{ANNOUNCE_INTERVAL, deserialize_announcement}}, config::Mode, packet::ip_is_v4};
 
 const fn const_unwrap<T, E>(r: Result<T, E>) -> T {
     match r {
@@ -53,9 +52,7 @@ impl L2ResolverImpl {
     }
 }
 
-const BROADCAST_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
-const ENTRY_TIMEOUT: std::time::Duration = BROADCAST_INTERVAL * 5;
-const TOMBSTONE_TIMEOUT: std::time::Duration = BROADCAST_INTERVAL * 10;
+const ENTRY_TIMEOUT: std::time::Duration = ANNOUNCE_INTERVAL * 5;
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy)]
 struct L3ResolverKey {
@@ -142,7 +139,7 @@ impl L3ResolverImpl {
                 };
                 match entry {
                     Occupied(mut e) => {
-                        if e.get().seqno < seqno {
+                        if e.get().recorded_at.elapsed() >= ENTRY_TIMEOUT || e.get().seqno < seqno {
                             e.insert(new_entry);
                         }
                     }
@@ -152,6 +149,13 @@ impl L3ResolverImpl {
                 };
             }
         }
+    }
+
+    fn announced(&mut self, from: NodeID, pkt: &[u8]) {
+        let Some((seqno, total, it)) = deserialize_announcement(pkt) else { return };
+        tracing::debug!("Received announcement from node {}: {} IPs", from, total);
+        let it = it.map(|(ip, metric)| (ip, seqno, metric));
+        self.update(from, it);
     }
 }
 
@@ -164,8 +168,6 @@ pub enum Resolver {
 pub enum ResolveResult {
     Unicast(NodeID),
     Broadcast,
-    Unreachable,
-    MalformedPkt,
 }
 
 impl Resolver {
@@ -176,69 +178,74 @@ impl Resolver {
         }
     }
 
-    pub async fn lookup(&self, pkt: &[u8]) -> ResolveResult {
+    pub async fn lookup(&self, pkt: &[u8]) -> Result<ResolveResult, SendError> {
         match self {
             Resolver::L2(r) => {
                 let Some(mac) = pkt.get(0..6).and_then(|s| s.try_into().ok()) else {
-                    return ResolveResult::MalformedPkt;
+                    return Err(SendError::MalformedPkt);
                 };
 
                 if mac == [0xff; 6] {
-                    return ResolveResult::Broadcast;
+                    return Ok(ResolveResult::Broadcast);
                 }
 
                 match r.read().await.lookup(&MACAddr(mac)) {
-                    Some(e) => ResolveResult::Unicast(e.target),
+                    Some(e) => Ok(ResolveResult::Unicast(e.target)),
                     // In L2 mode, if not found, broadcast
-                    None => ResolveResult::Broadcast,
+                    None => Ok(ResolveResult::Broadcast),
                 }
             }
             Resolver::L3(r) => {
                 let addr = if ip_is_v4(pkt) {
                     let Some(addr): Option<[u8; 4]> = pkt.get(16..20).and_then(|s| s.try_into().ok()) else {
-                        return ResolveResult::MalformedPkt;
+                        return Err(SendError::MalformedPkt);
                     };
 
                     if addr[0] & 0xf0 == 0xe0 {
-                        return ResolveResult::Broadcast;
+                        return Ok(ResolveResult::Broadcast);
                     }
 
                     IpAddr::V4(addr.into())
                 } else {
                     let Some(addr): Option<[u8; 16]> = pkt.get(24..40).and_then(|s| s.try_into().ok()) else {
-                        return ResolveResult::MalformedPkt;
+                        return Err(SendError::MalformedPkt);
                     };
 
                     if addr[0] == 0xff {
-                        return ResolveResult::Broadcast;
+                        return Ok(ResolveResult::Broadcast);
                     }
 
                     IpAddr::V6(addr.into())
                 };
 
                 match r.read().await.lookup(&addr) {
-                    Some(e) => ResolveResult::Unicast(e.target),
-                    None => ResolveResult::Unreachable,
+                    Some(e) => Ok(ResolveResult::Unicast(e.target)),
+                    None => Err(SendError::Unreachable),
                 }
             }
         }
     }
 
-    pub async fn ingress(&self, from: &VerifyingKey, pkt: &[u8]) {
-        let from = node_id_of(from);
+    // Returns true if the packet should skip further processing (e.g. announcement packet)
+    pub async fn ingress(&self, from: NodeID, pkt: &[u8]) -> bool {
         match self {
             Resolver::L2(r) => {
                 let Some(mac) = pkt.get(6..12).and_then(|s| s.try_into().ok()) else {
-                    return;
+                    return false;
                 };
                 let mac = MACAddr(mac);
                 // TODO: check if r already has an entry. Skip write locking
                 r.write().await.update(from, mac);
             },
-            Resolver::L3(_r) => {
-                // TODO: parse announcement pkt
-                return;
+            Resolver::L3(r) => {
+                if pkt[0] == 0x50 {
+                    // Is announcement packet
+                    r.write().await.announced(from, pkt);
+                    return true;
+                }
+                return false;
             }
         }
+        false
     }
 }

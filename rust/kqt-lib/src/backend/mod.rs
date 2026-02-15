@@ -5,6 +5,7 @@ use thiserror::Error;
 pub mod neighboor;
 pub mod resolver;
 pub mod router;
+pub mod announcer;
 pub mod engine;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -32,6 +33,12 @@ impl Ord for SeqNo {
 impl PartialOrd for SeqNo {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+impl SeqNo {
+    pub fn inc(&mut self) {
+        self.0 = self.0.wrapping_add(1);
     }
 }
 

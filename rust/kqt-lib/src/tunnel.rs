@@ -236,7 +236,7 @@ pub async fn run(
     tracing::debug!("Device created");
     cfg.apply_routes(device.clone()).await?;
 
-    let engine = Engine::new(cfg.mode, device.clone());
+    let engine = Engine::new(&cfg, device.clone());
 
     // Handle client
     for conn_cfg in cfg.connect_to {
@@ -270,6 +270,7 @@ async fn main_loop(
 ) -> anyhow::Result<()> {
     // Main loop
     let mut buf = Vec::new();
+    let eth_hdr = mode.eth_hdr().unwrap_or(0);
     'pkt: loop {
         let mtu;
         #[cfg(not(target_os = "android"))]
@@ -291,14 +292,14 @@ async fn main_loop(
 
         let mut active = &mut buf[FRONT_BUFFER..FRONT_BUFFER + len];
         let mut frag = None;
-        let orig_frag = ip_has_more_frag(&active[mode.extra_hdr()..]);
+        let orig_frag = ip_has_more_frag(&active[eth_hdr..]);
 
         #[allow(unused)]
         'frag: loop {
             let active_len = active.len();
             // Don't frag on first try.
             let sending = if let Some(frag) = frag {
-                frag_if_needed(frag, active, orig_frag, mode.extra_hdr())?
+                frag_if_needed(frag, active, orig_frag, eth_hdr)?
             } else {
                 &active[..]
             };
@@ -312,7 +313,7 @@ async fn main_loop(
                     break;
                 }
 
-                active = move_frag_headers(sending_len, active, mode.extra_hdr());
+                active = move_frag_headers(sending_len, active, eth_hdr);
                 continue;
             };
 
@@ -325,7 +326,7 @@ async fn main_loop(
                     continue;
                 }
 
-                if ip_can_frag(&sending[mode.extra_hdr()..]) {
+                if ip_can_frag(&sending[eth_hdr..]) {
                     frag = Some(mtu);
                     continue;
                 }
@@ -334,11 +335,11 @@ async fn main_loop(
                 let pkt_start = sending.as_ptr() as usize - buf_start;
                 let pkt_len = sending_len;
                 if let Some(pkt) = populate_packet_too_big(
-                    mtu - mode.extra_hdr(),
+                    mtu - eth_hdr,
                     &mut buf,
                     pkt_start,
                     pkt_len,
-                    mode.eth_extra_hdr(),
+                    mode.eth_hdr(),
                 )? {
                     device.send(pkt).await?;
                 }

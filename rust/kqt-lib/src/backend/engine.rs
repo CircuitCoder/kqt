@@ -1,7 +1,8 @@
 use std::{borrow::Cow, sync::Arc};
 
-use crate::{backend::{SendError, neighboor::Neighboors, resolver::Resolver, router::Router}, config::Mode, packet::{ETH_HDR_LEN, clamp_mss}};
+use crate::{backend::{SendError, announcer::{self, L3AnnouncerHandle}, neighboor::Neighboors, node_id_of, resolver::Resolver, router::{NodePath, Router}}, config::{Config, Mode}, packet::{ETH_HDR_LEN, clamp_mss}};
 
+use cidr::IpInet;
 use ed25519_dalek::VerifyingKey;
 use quinn::Connection;
 use tokio::sync::RwLock;
@@ -23,14 +24,7 @@ fn get_remote_identity(conn: &Connection) -> VerifyingKey {
 }
 
 impl Mode {
-    pub fn extra_hdr(&self) -> usize {
-        match self {
-            Mode::L2 => ETH_HDR_LEN,
-            Mode::L3 => 0,
-        }
-    }
-
-    pub fn eth_extra_hdr(&self) -> Option<usize> {
+    pub fn eth_hdr(&self) -> Option<usize> {
         match self {
             Mode::L2 => Some(ETH_HDR_LEN),
             Mode::L3 => None,
@@ -45,45 +39,67 @@ pub struct Engine {
     neighboors: Arc<RwLock<Neighboors>>,
     dev: Arc<tun_rs::AsyncDevice>,
     mode: Mode,
+
+    announcer: Option<L3AnnouncerHandle>,
 }
 
 impl Engine {
-    pub fn new(mode: Mode, dev: Arc<tun_rs::AsyncDevice>) -> Self {
-        // TODO: spawn L3 announcer
+    pub fn new(cfg: &Config, dev: Arc<tun_rs::AsyncDevice>) -> Self {
         let neighboors = Arc::new(RwLock::new(Neighboors::new()));
-        Self {
-            resolver: Resolver::new(mode),
-            router: Router::new(neighboors.clone()),
-            neighboors: neighboors,
+        let router = Router::new(neighboors.clone());
+        let announcer = if let Mode::L3 = cfg.mode {
+            let announcer = announcer::spawn(router.clone());
+            announcer.announcing.send(Arc::new(cfg.address.iter().map(|i|
+                (IpInet::new_host(i.address()), 1) // Local routes have metric 1
+            ).collect())).unwrap();
+            Some(announcer)
+        } else {
+            None
+        };
+
+        let ret = Self {
+            resolver: Resolver::new(cfg.mode),
+            router,
+            neighboors,
             dev,
-            mode,
-        }
+            mode: cfg.mode,
+            announcer,
+        };
+
+        ret
     }
 
     pub async fn send(&self, pkt: &[u8]) -> Result<(), SendError> {
         use crate::backend::resolver::ResolveResult::*;
-        let lookup = &self.resolver.lookup(pkt).await;
-        match lookup {
+        let lookup = &self.resolver.lookup(pkt).await?;
+        let tgt =  match lookup {
             Unicast(target) => {
-                return self.router.send(*target, pkt).await;
+                *target
             }
             Broadcast => {
                 return self.router.broadcast(pkt).await;
             }
-            Unreachable => {
-                return Err(SendError::Unreachable);
-            }
-            MalformedPkt => {
-                return Err(SendError::MalformedPkt);
-            }
-        }
+        };
+
+        // Fragmentation
+        return self.router.send(tgt, pkt).await;
     }
 
     pub async fn handle(&self, conn: quinn::Connection) -> anyhow::Result<!> {
         let identity = get_remote_identity(&conn);
 
         let mut neighboors = self.neighboors.write().await;
-        neighboors.find_neighboor(&identity).attach(conn.clone());
+        let neigh = neighboors.find_neighboor(&identity);
+        neigh.attach(conn.clone());
+        if let Some(announcer) = &self.announcer {
+            // May requires announcement
+            let node_id = node_id_of(&identity);
+            let mtu = neigh.outgoing_mtu();
+            announcer.join.send(NodePath {
+                node: node_id,
+                mtu,
+            }).await.unwrap();
+        }
         drop(neighboors);
 
         let err = self.handle_conn(conn.clone(), identity.clone()).await;
@@ -111,11 +127,14 @@ impl Engine {
             }
 
             // Resolver update
-            self.resolver.ingress(&identity, dgram.as_ref()).await;
+            let skip = self.resolver.ingress(node_id_of(&identity), dgram.as_ref()).await;
+            if skip {
+                continue;
+            }
 
             // Clamp MSS
             let patched = if let Some(mds) = conn.max_datagram_size() {
-                clamp_mss(dgram.as_ref(), mds, self.mode.extra_hdr())
+                clamp_mss(dgram.as_ref(), mds, self.mode.eth_hdr().unwrap_or(0))
             } else {
                 Cow::Borrowed(dgram.as_ref())
             };

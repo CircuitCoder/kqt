@@ -9,6 +9,11 @@ pub struct Router {
     neighboors: Arc<RwLock<Neighboors>>,
 }
 
+pub struct NodePath {
+    pub node: NodeID,
+    pub mtu: Option<usize>,
+}
+
 impl Router {
     pub fn new(neighboors: Arc<RwLock<Neighboors>>) -> Self {
         Self { neighboors }
@@ -31,6 +36,14 @@ impl Router {
             let _ = neigh.send(pkt);
         }
         Ok(())
+    }
+
+    pub async fn live_nodes(&self) -> Vec<NodePath> {
+        let neighboors = self.neighboors.read().await;
+        neighboors.iter().filter(|n| n.is_live()).map(|n| NodePath {
+            node: node_id_of(&n.identity),
+            mtu: n.outgoing_mtu()
+        }).collect()
     }
 }
 
