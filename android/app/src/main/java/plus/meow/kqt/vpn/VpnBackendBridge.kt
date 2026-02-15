@@ -70,13 +70,16 @@ class VpnBackendBridge(
 
         // Get routes from the parsed config
         // SerializedRoute is used directly in VpnConfig
-        val routes = parsedConfig.routes()
+        val routes = parsedConfig.route()
 
         // Get MTU from the parsed config (it returns UShort? so we need to handle null)
         val mtu = parsedConfig.mtu()?.toInt() ?: 1500
 
+        val dnsServers = parsedConfig.dns()
+
         return VpnConfig(
             addresses = addresses,
+            dnsServers = dnsServers,
             routes = routes,
             mtu = mtu
         )
