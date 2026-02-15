@@ -75,8 +75,24 @@ jobs:
         working-directory: ./android
         run: ./gradlew assembleDebug --stacktrace
 
+      - name: Decode keystore
+        if: github.event_name != 'pull_request'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > /home/runner/work/kqt/kqt/android/app/release.keystore
+          else
+            echo "Warning: KEYSTORE_BASE64 secret not found. Skipping signing."
+          fi
+
       - name: Build release APK
         working-directory: ./android
+        env:
+          KEYSTORE_FILE: /home/runner/work/kqt/kqt/android/app/release.keystore
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleRelease --stacktrace
 
       - name: Upload debug APKs
