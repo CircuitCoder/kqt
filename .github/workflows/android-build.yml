@@ -95,6 +95,10 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleRelease --stacktrace
 
+      - name: Clean up keystore
+        if: always()
+        run: rm -f ${{ github.workspace }}/android/app/release.keystore
+
       - name: Upload debug APKs
         uses: actions/upload-artifact@v4
         with:
