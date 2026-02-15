@@ -1,72 +1,18 @@
 use quinn::{
-    Connecting, Endpoint, EndpointConfig, MtuDiscoveryConfig,
-    congestion::BbrConfig,
-    crypto::rustls::{QuicClientConfig, QuicServerConfig},
-    rustls::{self, version::TLS13},
+    Connecting, Endpoint, EndpointConfig, MtuDiscoveryConfig, congestion::BbrConfig, crypto::rustls::{QuicClientConfig, QuicServerConfig}, rustls::{self, version::TLS13}
 };
-use std::{borrow::Cow, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use crate::{
-    config::{Config, ConnectTo, Mode},
-    crypto::{LiteCertVerifier, ParsedKeypair, ParsedTrustAnchor},
-    packet::{clamp_mss, ip_has_more_frag, ip_is_v4, populate_packet_too_big},
-    peers::Mappable,
-    *,
+    backend::{SendError, engine::Engine}, config::{Config, ConnectTo, Mode}, crypto::{LiteCertVerifier, ParsedKeypair, ParsedTrustAnchor}, packet::{ETH_HDR_LEN, ip_has_more_frag, populate_packet_too_big}
 };
 use crate::{
     packet::{FRONT_BUFFER, frag_if_needed, ip_can_frag, move_frag_headers},
-    peers::Peers,
 };
 
 const KQT_PROTO_VERSION: &'static [u8] = b"kqt/0.1";
-const ETH_HDR_LEN: usize = 14;
 
 impl Mode {
-    fn extra_hdr(&self) -> usize {
-        match self {
-            Mode::L2 => ETH_HDR_LEN,
-            Mode::L3 => 0,
-        }
-    }
-
-    fn eth_extra_hdr(&self) -> Option<usize> {
-        match self {
-            Mode::L2 => Some(ETH_HDR_LEN),
-            Mode::L3 => None,
-        }
-    }
-
-    fn parse_send_target(&self, data: &[u8]) -> Option<peers::SendTarget> {
-        match self {
-            Mode::L2 => {
-                let mac: [u8; 6] = data.get(0..6)?.try_into().unwrap();
-                if mac == [0xff; 6] {
-                    Some(peers::SendTarget::Broadcast)
-                } else {
-                    Some(peers::SendTarget::UnicastMAC(peers::MACAddr(mac)))
-                }
-            }
-            Mode::L3 => {
-                // Detect IP version
-                if ip_is_v4(data) {
-                    let addr: [u8; 4] = data.get(16..20)?.try_into().unwrap();
-                    // Check multicast
-                    if addr[0] & 0xf0 == 0xe0 {
-                        return Some(peers::SendTarget::Broadcast);
-                    }
-                    Some(peers::SendTarget::UnicastIP(addr.into()))
-                } else {
-                    let addr: [u8; 16] = data.get(24..40)?.try_into().unwrap();
-                    // Check multicast
-                    if addr[0] == 0xff {
-                        return Some(peers::SendTarget::Broadcast);
-                    }
-                    Some(peers::SendTarget::UnicastIP(addr.into()))
-                }
-            }
-        }
-    }
-
     fn alpn(&self) -> Vec<u8> {
         let mut v = KQT_PROTO_VERSION.to_vec();
         match self {
@@ -290,16 +236,14 @@ pub async fn run(
     tracing::debug!("Device created");
     cfg.apply_routes(device.clone()).await?;
 
-    let store = Peers::new();
+    let engine = Engine::new(cfg.mode, device.clone());
 
     // Handle client
     for conn_cfg in cfg.connect_to {
-        cancel.spawn(handle_target(
+        cancel.spawn(handle_client(
             endpoint.clone(),
-            device.clone(),
             conn_cfg,
-            store.clone(),
-            cfg.mode,
+            engine.clone(),
         ));
     }
 
@@ -307,23 +251,21 @@ pub async fn run(
     if cfg.listen.is_some() {
         cancel.spawn(handle_server(
             endpoint,
-            device.clone(),
-            store.clone(),
-            cfg.mode,
+            engine.clone(),
             cancel.clone(),
         ));
     }
 
     cancel
-        .spawn(main_loop(device, cfg.mode, store, iface))
+        .spawn(main_loop(device, engine, cfg.mode, iface))
         .await?;
     Ok(())
 }
 
 async fn main_loop(
     device: Arc<tun_rs::AsyncDevice>,
+    engine: Engine,
     mode: Mode,
-    store: Peers,
     _iface: IfaceSetup,
 ) -> anyhow::Result<()> {
     // Main loop
@@ -345,10 +287,7 @@ async fn main_loop(
         let buf_start = buf.as_ptr() as usize;
         let len: usize = device.recv(&mut buf[FRONT_BUFFER..]).await?;
 
-        let Some(target) = mode.parse_send_target(&buf[FRONT_BUFFER..FRONT_BUFFER + len]) else {
-            tracing::debug!("Unable to parse route target, dropping packet");
-            continue 'pkt;
-        };
+        // TODO: move fragmentation into engine, so that we only resolve / routes once
 
         let mut active = &mut buf[FRONT_BUFFER..FRONT_BUFFER + len];
         let mut frag = None;
@@ -365,7 +304,7 @@ async fn main_loop(
             };
             let sending_len = sending.len();
             assert!(active_len >= sending_len);
-            let sent = store.send(&target, sending).await;
+            let sent = engine.send(sending).await;
 
             let Err(e) = sent else {
                 // Sent successfully, check if more frags are present
@@ -379,7 +318,7 @@ async fn main_loop(
 
             tracing::warn!("Error sending datagram: {:?}", e);
             // Check error, and if applicable, frag
-            if let peers::SendError::PacketTooBig { mtu } = e {
+            if let SendError::PacketTooBig { mtu } = e {
                 if mtu >= sending_len {
                     // Retry
                     // TODO: bound retry iterations?
@@ -413,19 +352,19 @@ async fn main_loop(
     }
 }
 
-async fn handle_target(
+async fn handle_client(
     ep: Endpoint,
-    device: Arc<tun_rs::AsyncDevice>,
     cfg: ConnectTo,
-    store: Peers,
-    mode: Mode,
+    engine: Engine,
 ) -> ! {
+    async fn handle_client_once(ep: &Endpoint, cfg: &ConnectTo, engine: &Engine) -> anyhow::Result<!> {
+        // We don't actually use server_name. Use a dummy IPv4 here.
+        let conn = ep.connect(cfg.endpoint, "0.0.0.0")?.await?;
+        engine.handle(conn).await
+    }
+
     loop {
-        let Err(err): anyhow::Result<!> = try {
-            // We don't actually use server_name. Use a dummy IPv4 here.
-            let conn = ep.connect(cfg.endpoint, "0.0.0.0").map_err(Into::into)?;
-            handle_connection(conn, device.clone(), Some(&cfg), store.clone(), mode).await?
-        };
+        let Err(err) = handle_client_once(&ep, &cfg, &engine).await;
         tracing::error!("Outgoing connection to {} closed: {}", cfg.endpoint, err);
         match err.downcast::<quinn::ConnectionError>() {
             Ok(quinn::ConnectionError::TimedOut) => {
@@ -444,83 +383,23 @@ async fn handle_target(
     }
 }
 
-async fn handle_connection(
-    conn: Connecting,
-    device: Arc<tun_rs::AsyncDevice>,
-    cfg: Option<&ConnectTo>,
-    store: Peers,
-    mode: Mode,
-) -> anyhow::Result<!> {
-    let conn = conn.await?;
-    let mds = conn.max_datagram_size();
-    let addr = conn.remote_address();
-    tracing::info!("New connection from {}, max dgram size {:?}", addr, mds);
-    store.attach_conn(conn.clone()).await;
-
-    if let Some(cfg) = cfg {
-        // Register designated IPs
-        for range in cfg.designated_range.iter() {
-            store.map(Mappable::IpInet(*range), &conn).await;
-        }
-    }
-
-    let ret: anyhow::Result<!> = try {
-        loop {
-            let dgram = conn.read_datagram().await.map_err(Into::into)?;
-            tracing::debug!("[RECV] {}", dgram.len());
-            if dgram.len() == 0 {
-                tracing::warn!("Empty datagram received");
-                continue;
-            }
-
-            // Clamp MSS
-            let patched = if let Some(mds) = conn.max_datagram_size() {
-                clamp_mss(dgram.as_ref(), mds, mode.extra_hdr())
-            } else {
-                Cow::Borrowed(dgram.as_ref())
-            };
-
-            // Simply forward to device
-            let written = device.send(patched.as_ref()).await.map_err(Into::into)?;
-            if written != dgram.len() {
-                tracing::warn!(
-                    "Partial write to tap device, {} instead of {}",
-                    written,
-                    dgram.len()
-                );
-            }
-
-            // TODO: unwrap envelope
-
-            // Also, parse the source MAC address
-            if mode == Mode::L2 {
-                if let Some(mac) = dgram.get(6..12).and_then(|s| s.try_into().ok()) {
-                    let mac = peers::MACAddr(mac);
-                    // Register the connection with the MAC address
-                    store.map(Mappable::MAC(mac), &conn).await;
-                }
-            }
-        }
-    };
-    store.detach_conn(&conn).await;
-    ret
-}
-
 async fn handle_server(
     ep: Endpoint,
-    device: Arc<tun_rs::AsyncDevice>,
-    store: Peers,
-    mode: Mode,
+    engine: Engine,
     cancel: CancellationToken,
 ) -> anyhow::Result<()> {
+    async fn handle_server_once(conn: Connecting, engine: Engine) -> anyhow::Result<!> {
+        let conn = conn.await?;
+        engine.handle(conn).await?;
+    }
+
     tracing::info!("Listening on {}", ep.local_addr()?);
     while let Some(incoming) = ep.accept().await {
         let conn = incoming.accept()?;
-        let from = conn.remote_address();
-        let device_clone = device.clone();
-        let store_clone = store.clone();
+        let engine = engine.clone();
         cancel.spawn(async move {
-            let Err(e) = handle_connection(conn, device_clone, None, store_clone, mode).await;
+            let from = conn.remote_address();
+            let Err(e) = handle_server_once(conn, engine).await;
             tracing::error!("Incoming connection from {} closed: {}", from, e);
         });
     }

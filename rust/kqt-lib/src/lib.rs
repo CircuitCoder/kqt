@@ -5,11 +5,12 @@
     substr_range,
     btree_cursors,
     const_convert,
-    const_precise_live_drops
+    const_precise_live_drops,
+    const_ops
 )]
 
 pub mod config;
 pub mod crypto;
 pub mod packet;
-pub mod peers;
 pub mod tunnel;
+pub mod backend;

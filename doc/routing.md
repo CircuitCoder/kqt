@@ -18,7 +18,7 @@ For L3, each node will broadcast its prefixes to all other nodes. The routing pr
 
 The prefix broadcast will only be enabled in L3 mode, so the packet content is necessarily IP packets. Let's hope that no future standard (or other civilization) will use IP version 5, and reuse that protocol version number to indicate a prefix broadcast.
 
-Each node should broadcast its prefixes at least every T duration. Prefixes expires after 2T duration. Tombstones should be kept for at least 3T duration. Since source node broadcasts all its prefix, and no prefix propagation is done, there is no risk of routing loops.
+Each node should broadcast its prefixes at least every T duration. Prefixes expires after 5T duration. Tombstones should be kept for at least 10T duration. Since source node broadcasts all its prefix, and no prefix propagation is done, there is no risk of routing loops.
 
 Current protocol sets T = 30s. It's important that the entire network agrees on the value of T, so it's not exposed as a configuration option.
 

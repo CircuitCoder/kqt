@@ -2,6 +2,7 @@ use std::borrow::Cow;
 
 use rand_core::RngCore;
 
+pub const ETH_HDR_LEN: usize = 14;
 const IPV4_HDR_LEN: usize = 20;
 const IPV4_HDR_LEN_ENCODED: u8 = 5;
 const ICMPV4_DESTINATION_UNREACHABLE_LEN: usize = 8;
