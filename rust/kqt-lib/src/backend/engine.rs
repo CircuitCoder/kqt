@@ -78,8 +78,10 @@ impl Engine {
             None
         };
 
+        let resolver = Resolver::new(cfg);
+
         let ret = Self {
-            resolver: Resolver::new(cfg.mode),
+            resolver,
             router,
             neighboors,
             dev,

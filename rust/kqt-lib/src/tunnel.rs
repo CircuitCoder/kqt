@@ -98,7 +98,7 @@ impl Config {
 
     #[cfg(not(feature = "route"))]
     async fn apply_routes(&self, _device: Arc<tun_rs::AsyncDevice>) -> anyhow::Result<()> {
-        if self.routes.len() > 0 {
+        if self.route.len() > 0 {
             tracing::warn!("Route feature not enabled, ignoring configured routes.");
         }
         Ok(())
@@ -106,10 +106,10 @@ impl Config {
 
     #[cfg(feature = "route")]
     async fn apply_routes(&self, device: Arc<tun_rs::AsyncDevice>) -> anyhow::Result<()> {
-        if self.routes.len() > 0 {
+        if self.route.len() > 0 {
             let ifindex = device.if_index()?;
             let handle = net_route::Handle::new()?;
-            for route in self.routes.iter() {
+            for route in self.route.iter() {
                 let mut r = net_route::Route::new(route.to.address(), route.to.network_length())
                     .with_gateway(route.via)
                     .with_ifindex(ifindex);
@@ -129,6 +129,20 @@ impl Config {
                 tracing::info!("Added route: {} via {}", route.to, route.via);
             }
         }
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn apply_dns(&self, _device: &tun_rs::AsyncDevice) -> anyhow::Result<()> {
+        if self.dns.len() > 0 {
+            tracing::warn!("DNS configuration is only supported on Windows, ignoring.");
+        }
+        Ok(())
+    }
+
+    #[cfg(target_os = "windows")]
+    fn apply_dns(&self, device: &tun_rs::AsyncDevice) -> anyhow::Result<()> {
+        device.set_dns_servers(self.dns.as_slice())?;
         Ok(())
     }
 }
@@ -238,7 +252,12 @@ pub async fn run(
 
     let device = cfg.build_device(&iface)?;
     tracing::debug!("Device created");
-    cfg.apply_routes(device.clone()).await?;
+
+    if cfg.table {
+        cfg.apply_routes(device.clone()).await?;
+    }
+
+    cfg.apply_dns(&*device)?;
 
     let engine = Engine::new(&cfg, device.clone());
 

@@ -72,12 +72,20 @@ impl ParsedConfig {
             .collect()
     }
 
-    fn routes(&self) -> Vec<SerializedRoute> {
+    fn route(&self) -> Vec<SerializedRoute> {
+        if !self.cfg.table {
+            return vec![];
+        }
+
         self.cfg
-            .routes
+            .route
             .iter()
             .map(|net| SerializedRoute::from(net))
             .collect()
+    }
+
+    fn dns(&self) -> Vec<String> {
+        self.cfg.dns.iter().map(|ip| ip.to_string()).collect()
     }
 
     fn mtu(&self) -> Option<u16> {
