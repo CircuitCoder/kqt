@@ -32,13 +32,9 @@ android {
                 storePassword = keystorePass
                 keyAlias = alias
                 keyPassword = keyPass
-            } else {
-                // Fallback for local builds without signing
-                storeFile = file("release.keystore")
-                storePassword = ""
-                keyAlias = ""
-                keyPassword = ""
             }
+            // If environment variables are not set, signing will be skipped
+            // This allows the build to complete without signing credentials
         }
     }
 
@@ -49,7 +45,15 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("release")
+            // Only apply signing config if all credentials are available
+            val keystoreFile = System.getenv("KEYSTORE_FILE")
+            val keystorePass = System.getenv("KEYSTORE_PASSWORD")
+            val alias = System.getenv("KEY_ALIAS")
+            val keyPass = System.getenv("KEY_PASSWORD")
+            
+            if (keystoreFile != null && keystorePass != null && alias != null && keyPass != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     
