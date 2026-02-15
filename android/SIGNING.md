@@ -20,10 +20,10 @@ To enable APK signing in GitHub Actions, you need to configure the following sec
 If you don't have a keystore yet, create one using the following command:
 
 ```bash
-keytool -genkeypair -v -keystore release.keystore -alias your-key-alias -keyalg RSA -keysize 2048 -validity 10000
+keytool -genkeypair -v -keystore release.keystore -alias your-key-alias -keyalg RSA -keysize 2048 -validity 3650
 ```
 
-Follow the prompts to set passwords and fill in the certificate information.
+This creates a keystore valid for 10 years (3650 days). Follow the prompts to set passwords and fill in the certificate information.
 
 ### Encoding the Keystore
 

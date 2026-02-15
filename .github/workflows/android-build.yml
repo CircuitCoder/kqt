@@ -82,6 +82,7 @@ jobs:
         run: |
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "$KEYSTORE_BASE64" | base64 -d > ${{ github.workspace }}/android/app/release.keystore
+            chmod 600 ${{ github.workspace }}/android/app/release.keystore
           else
             echo "Warning: KEYSTORE_BASE64 secret not found. Skipping signing."
           fi
