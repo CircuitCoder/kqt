@@ -10,7 +10,9 @@ use crate::{
         router::{NodePath, Router},
     },
     config::{Config, Mode},
-    packet::{ETH_HDR_LEN, clamp_mss},
+    packet::{
+        ETH_HDR_LEN, clamp_mss, frag_if_needed, ip_can_frag, ip_has_more_frag, move_frag_headers,
+    },
 };
 
 use cidr::IpInet;
@@ -88,18 +90,63 @@ impl Engine {
         ret
     }
 
-    pub async fn send(&self, pkt: &[u8]) -> Result<(), SendError> {
+    pub async fn send_frag(&self, buf: &mut [u8]) -> Result<(), SendError> {
         use crate::backend::resolver::ResolveResult::*;
-        let lookup = &self.resolver.lookup(pkt).await?;
+        let lookup = &self.resolver.lookup(buf).await?;
+
         let tgt = match lookup {
             Unicast(target) => *target,
             Broadcast => {
-                return self.router.broadcast(pkt).await;
+                return self.router.broadcast(buf).await;
             }
         };
 
-        // Fragmentation
-        return self.router.send(tgt, pkt).await;
+        let eth_hdr = self.mode.eth_hdr().unwrap_or(0);
+
+        let mut active = buf;
+        let mut frag = None;
+        let orig_frag = ip_has_more_frag(&active[eth_hdr..]);
+
+        loop {
+            let active_len = active.len();
+            // Don't frag on first try.
+            let sending = if let Some(frag) = frag {
+                frag_if_needed(frag, active, orig_frag, eth_hdr)?
+            } else {
+                &active[..]
+            };
+            let sending_len = sending.len();
+            assert!(active_len >= sending_len);
+            let sent = self.router.send(tgt, sending).await;
+
+            let Err(e) = sent else {
+                // Sent successfully, check if more frags are present
+                if active_len == sending_len {
+                    break;
+                }
+
+                active = move_frag_headers(sending_len, active, eth_hdr);
+                continue;
+            };
+
+            // Check error, and if applicable, frag
+            if let SendError::PacketTooBig { mtu } = e {
+                if mtu >= sending_len {
+                    // Retry
+                    // TODO: bound retry iterations?
+                    continue;
+                }
+
+                if ip_can_frag(&sending[eth_hdr..]) {
+                    frag = Some(mtu);
+                    continue;
+                }
+            }
+
+            return Err(e);
+        }
+
+        Ok(())
     }
 
     pub async fn handle(&self, conn: quinn::Connection) -> anyhow::Result<!> {

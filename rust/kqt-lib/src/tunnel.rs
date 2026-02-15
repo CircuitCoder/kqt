@@ -6,12 +6,12 @@ use quinn::{
 };
 use std::{sync::Arc, time::Duration};
 
-use crate::packet::{FRONT_BUFFER, frag_if_needed, ip_can_frag, move_frag_headers};
+use crate::packet::FRONT_BUFFER;
 use crate::{
     backend::{SendError, engine::Engine},
     config::{Config, ConnectTo, Mode},
     crypto::{LiteCertVerifier, ParsedKeypair, ParsedTrustAnchor},
-    packet::{ETH_HDR_LEN, ip_has_more_frag, populate_packet_too_big},
+    packet::{ETH_HDR_LEN, populate_packet_too_big},
 };
 
 const KQT_PROTO_VERSION: &'static [u8] = b"kqt/0.1";
@@ -266,8 +266,7 @@ async fn main_loop(
 ) -> anyhow::Result<()> {
     // Main loop
     let mut buf = Vec::new();
-    let eth_hdr = mode.eth_hdr().unwrap_or(0);
-    'pkt: loop {
+    loop {
         let mtu;
         #[cfg(not(target_os = "android"))]
         {
@@ -281,70 +280,28 @@ async fn main_loop(
             mtu = *init_mtu;
         }
         buf.resize(mtu as usize + ETH_HDR_LEN + FRONT_BUFFER, 0);
-        let buf_start = buf.as_ptr() as usize;
         let len: usize = device.recv(&mut buf[FRONT_BUFFER..]).await?;
 
-        // TODO: move fragmentation into engine, so that we only resolve / routes once
+        let Err(e) = engine
+            .send_frag(&mut buf[FRONT_BUFFER..FRONT_BUFFER + len])
+            .await
+        else {
+            continue;
+        };
 
-        let mut active = &mut buf[FRONT_BUFFER..FRONT_BUFFER + len];
-        let mut frag = None;
-        let orig_frag = ip_has_more_frag(&active[eth_hdr..]);
+        tracing::error!("Error sending datagram: {:?}", e);
 
-        #[allow(unused)]
-        'frag: loop {
-            let active_len = active.len();
-            // Don't frag on first try.
-            let sending = if let Some(frag) = frag {
-                frag_if_needed(frag, active, orig_frag, eth_hdr)?
-            } else {
-                &active[..]
-            };
-            let sending_len = sending.len();
-            assert!(active_len >= sending_len);
-            let sent = engine.send(sending).await;
-
-            let Err(e) = sent else {
-                // Sent successfully, check if more frags are present
-                if active_len == sending_len {
-                    break;
-                }
-
-                active = move_frag_headers(sending_len, active, eth_hdr);
-                continue;
-            };
-
-            tracing::warn!("Error sending datagram: {:?}", e);
-            // Check error, and if applicable, frag
-            if let SendError::PacketTooBig { mtu } = e {
-                if mtu >= sending_len {
-                    // Retry
-                    // TODO: bound retry iterations?
-                    continue;
-                }
-
-                if ip_can_frag(&sending[eth_hdr..]) {
-                    frag = Some(mtu);
-                    continue;
-                }
-
-                tracing::debug!("Generating packet too big");
-                let pkt_start = sending.as_ptr() as usize - buf_start;
-                let pkt_len = sending_len;
-                if let Some(pkt) = populate_packet_too_big(
-                    mtu - eth_hdr,
-                    &mut buf,
-                    pkt_start,
-                    pkt_len,
-                    mode.eth_hdr(),
-                )? {
-                    device.send(pkt).await?;
-                }
-
-                break;
+        if let SendError::PacketTooBig { mtu } = e {
+            tracing::debug!("Generating packet too big");
+            if let Some(pkt) = populate_packet_too_big(
+                mtu - mode.eth_hdr().unwrap_or(0),
+                &mut buf,
+                FRONT_BUFFER,
+                len,
+                mode.eth_hdr(),
+            )? {
+                device.send(pkt).await?;
             }
-
-            tracing::error!("Error sending datagram: {:?}", e);
-            break;
         }
     }
 }

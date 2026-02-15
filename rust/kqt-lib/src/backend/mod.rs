@@ -59,6 +59,8 @@ pub enum SendError {
     Unreachable,
     #[error("malformed packet")]
     MalformedPkt,
-    #[error("unknown error")]
-    Unknown(#[from] SendDatagramError),
+    #[error("transport-level error")]
+    SendDatagramError(#[from] SendDatagramError),
+    #[error("Unknown error")]
+    Unknown(#[from] anyhow::Error),
 }
