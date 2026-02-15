@@ -1,9 +1,15 @@
 use std::sync::Arc;
 
 use cidr::IpInet;
-use tokio::{select, sync::{mpsc, watch}};
+use tokio::{
+    select,
+    sync::{mpsc, watch},
+};
 
-use crate::backend::{SeqNo, router::{NodePath, Router}};
+use crate::backend::{
+    SeqNo,
+    router::{NodePath, Router},
+};
 
 pub const ANNOUNCE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 pub const TOMBSTONE_TIMEOUT: std::time::Duration = ANNOUNCE_INTERVAL * 10;
@@ -15,7 +21,6 @@ pub struct L3Announcer {
     join: mpsc::Receiver<NodePath>,
 
     seqno: SeqNo,
-
     // TODO: tombstones
 }
 
@@ -27,10 +32,18 @@ pub struct L3AnnouncerHandle {
 
 // FIXME: seqno
 impl L3Announcer {
-    async fn send_to(&self, router: &Router, node: NodePath, ips: &[(IpInet, u16)], buf: &mut Vec<u8>) {
+    async fn send_to(
+        &self,
+        router: &Router,
+        node: NodePath,
+        ips: &[(IpInet, u16)],
+        buf: &mut Vec<u8>,
+    ) {
         tracing::debug!("Announcing to node {}: {} IPs", node.node, ips.len());
         let Some(mtu) = node.mtu else { return };
-        if mtu < 1000 { return }
+        if mtu < 1000 {
+            return;
+        }
 
         buf.resize(mtu, 0);
 
@@ -111,7 +124,6 @@ impl L3Announcer {
                     }
                 }
             }
-
         }
     }
 }
@@ -175,23 +187,29 @@ pub fn deserialize_ipinet_from(buf: &[u8]) -> Option<((IpInet, u16), usize)> {
     let ip_type = buf[0];
     let network_length = buf[1] as u8;
     let metric = u16::from_be_bytes(buf[2..4].try_into().unwrap());
-    
+
     match ip_type {
         0 => {
             let addr: [u8; 4] = buf.get(4..8)?.try_into().unwrap();
             let ipv4 = std::net::Ipv4Addr::from(addr);
-            IpInet::new(ipv4.into(), network_length).ok().map(|ip| ((ip, metric), 8))
+            IpInet::new(ipv4.into(), network_length)
+                .ok()
+                .map(|ip| ((ip, metric), 8))
         }
         1 => {
             let addr: [u8; 16] = buf.get(4..20)?.try_into().unwrap();
             let ipv6 = std::net::Ipv6Addr::from(addr);
-            IpInet::new(ipv6.into(), network_length).ok().map(|ip| ((ip, metric), 20))
+            IpInet::new(ipv6.into(), network_length)
+                .ok()
+                .map(|ip| ((ip, metric), 20))
         }
         _ => None,
     }
 }
 
-pub fn deserialize_announcement(announcement: &[u8]) -> Option<(SeqNo, usize, impl Iterator<Item = (IpInet, u16)>)> {
+pub fn deserialize_announcement(
+    announcement: &[u8],
+) -> Option<(SeqNo, usize, impl Iterator<Item = (IpInet, u16)>)> {
     if announcement.len() < 4 {
         return None;
     }

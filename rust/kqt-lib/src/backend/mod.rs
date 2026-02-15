@@ -2,11 +2,11 @@ use ed25519_dalek::VerifyingKey;
 use quinn::SendDatagramError;
 use thiserror::Error;
 
+pub mod announcer;
+pub mod engine;
 pub mod neighboor;
 pub mod resolver;
 pub mod router;
-pub mod announcer;
-pub mod engine;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MACAddr(pub [u8; 6]);

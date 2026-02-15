@@ -3,7 +3,14 @@ use std::{collections::BTreeMap, net::IpAddr, sync::Arc};
 use cidr::{IpInet, Ipv4Inet, Ipv6Inet};
 use tokio::sync::RwLock;
 
-use crate::{backend::{MACAddr, NodeID, SendError, SeqNo, announcer::{ANNOUNCE_INTERVAL, deserialize_announcement}}, config::Mode, packet::ip_is_v4};
+use crate::{
+    backend::{
+        MACAddr, NodeID, SendError, SeqNo,
+        announcer::{ANNOUNCE_INTERVAL, deserialize_announcement},
+    },
+    config::Mode,
+    packet::ip_is_v4,
+};
 
 const fn const_unwrap<T, E>(r: Result<T, E>) -> T {
     match r {
@@ -35,7 +42,9 @@ impl L2ResolverImpl {
     fn lookup(&self, t: &MACAddr) -> Option<&L2ResolverEntry> {
         let key = L2ResolverKey { mac: *t, target: 0 };
         let mut it = self.mappings.upper_bound(std::ops::Bound::Excluded(&key));
-        while let Some((k, l)) = it.next() && k.mac == *t {
+        while let Some((k, l)) = it.next()
+            && k.mac == *t
+        {
             if l.recorded_at.elapsed() < ENTRY_TIMEOUT {
                 return Some(l);
             }
@@ -45,10 +54,13 @@ impl L2ResolverImpl {
 
     pub fn update(&mut self, from: NodeID, mac: MACAddr) {
         let target = L2ResolverKey { mac, target: from };
-        self.mappings.insert(target, L2ResolverEntry {
-            target: from,
-            recorded_at: std::time::Instant::now(),
-        });
+        self.mappings.insert(
+            target,
+            L2ResolverEntry {
+                target: from,
+                recorded_at: std::time::Instant::now(),
+            },
+        );
     }
 }
 
@@ -152,7 +164,9 @@ impl L3ResolverImpl {
     }
 
     fn announced(&mut self, from: NodeID, pkt: &[u8]) {
-        let Some((seqno, total, it)) = deserialize_announcement(pkt) else { return };
+        let Some((seqno, total, it)) = deserialize_announcement(pkt) else {
+            return;
+        };
         tracing::debug!("Received announcement from node {}: {} IPs", from, total);
         let it = it.map(|(ip, metric)| (ip, seqno, metric));
         self.update(from, it);
@@ -173,8 +187,12 @@ pub enum ResolveResult {
 impl Resolver {
     pub fn new(mode: Mode) -> Self {
         match mode {
-            Mode::L2 => Resolver::L2(Arc::new(RwLock::new(L2ResolverImpl { mappings: BTreeMap::new() }))),
-            Mode::L3 => Resolver::L3(Arc::new(RwLock::new(L3ResolverImpl { mappings: BTreeMap::new() }))),
+            Mode::L2 => Resolver::L2(Arc::new(RwLock::new(L2ResolverImpl {
+                mappings: BTreeMap::new(),
+            }))),
+            Mode::L3 => Resolver::L3(Arc::new(RwLock::new(L3ResolverImpl {
+                mappings: BTreeMap::new(),
+            }))),
         }
     }
 
@@ -197,7 +215,9 @@ impl Resolver {
             }
             Resolver::L3(r) => {
                 let addr = if ip_is_v4(pkt) {
-                    let Some(addr): Option<[u8; 4]> = pkt.get(16..20).and_then(|s| s.try_into().ok()) else {
+                    let Some(addr): Option<[u8; 4]> =
+                        pkt.get(16..20).and_then(|s| s.try_into().ok())
+                    else {
                         return Err(SendError::MalformedPkt);
                     };
 
@@ -207,7 +227,9 @@ impl Resolver {
 
                     IpAddr::V4(addr.into())
                 } else {
-                    let Some(addr): Option<[u8; 16]> = pkt.get(24..40).and_then(|s| s.try_into().ok()) else {
+                    let Some(addr): Option<[u8; 16]> =
+                        pkt.get(24..40).and_then(|s| s.try_into().ok())
+                    else {
                         return Err(SendError::MalformedPkt);
                     };
 
@@ -236,7 +258,7 @@ impl Resolver {
                 let mac = MACAddr(mac);
                 // TODO: check if r already has an entry. Skip write locking
                 r.write().await.update(from, mac);
-            },
+            }
             Resolver::L3(r) => {
                 if pkt[0] == 0x50 {
                     // Is announcement packet

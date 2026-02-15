@@ -40,10 +40,14 @@ impl Router {
 
     pub async fn live_nodes(&self) -> Vec<NodePath> {
         let neighboors = self.neighboors.read().await;
-        neighboors.iter().filter(|n| n.is_live()).map(|n| NodePath {
-            node: node_id_of(&n.identity),
-            mtu: n.outgoing_mtu()
-        }).collect()
+        neighboors
+            .iter()
+            .filter(|n| n.is_live())
+            .map(|n| NodePath {
+                node: node_id_of(&n.identity),
+                mtu: n.outgoing_mtu(),
+            })
+            .collect()
     }
 }
 

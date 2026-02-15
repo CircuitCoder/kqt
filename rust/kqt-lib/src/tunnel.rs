@@ -1,13 +1,17 @@
 use quinn::{
-    Connecting, Endpoint, EndpointConfig, MtuDiscoveryConfig, congestion::BbrConfig, crypto::rustls::{QuicClientConfig, QuicServerConfig}, rustls::{self, version::TLS13}
+    Connecting, Endpoint, EndpointConfig, MtuDiscoveryConfig,
+    congestion::BbrConfig,
+    crypto::rustls::{QuicClientConfig, QuicServerConfig},
+    rustls::{self, version::TLS13},
 };
 use std::{sync::Arc, time::Duration};
 
+use crate::packet::{FRONT_BUFFER, frag_if_needed, ip_can_frag, move_frag_headers};
 use crate::{
-    backend::{SendError, engine::Engine}, config::{Config, ConnectTo, Mode}, crypto::{LiteCertVerifier, ParsedKeypair, ParsedTrustAnchor}, packet::{ETH_HDR_LEN, ip_has_more_frag, populate_packet_too_big}
-};
-use crate::{
-    packet::{FRONT_BUFFER, frag_if_needed, ip_can_frag, move_frag_headers},
+    backend::{SendError, engine::Engine},
+    config::{Config, ConnectTo, Mode},
+    crypto::{LiteCertVerifier, ParsedKeypair, ParsedTrustAnchor},
+    packet::{ETH_HDR_LEN, ip_has_more_frag, populate_packet_too_big},
 };
 
 const KQT_PROTO_VERSION: &'static [u8] = b"kqt/0.1";
@@ -240,20 +244,12 @@ pub async fn run(
 
     // Handle client
     for conn_cfg in cfg.connect_to {
-        cancel.spawn(handle_client(
-            endpoint.clone(),
-            conn_cfg,
-            engine.clone(),
-        ));
+        cancel.spawn(handle_client(endpoint.clone(), conn_cfg, engine.clone()));
     }
 
     // Handle server
     if cfg.listen.is_some() {
-        cancel.spawn(handle_server(
-            endpoint,
-            engine.clone(),
-            cancel.clone(),
-        ));
+        cancel.spawn(handle_server(endpoint, engine.clone(), cancel.clone()));
     }
 
     cancel
@@ -353,12 +349,12 @@ async fn main_loop(
     }
 }
 
-async fn handle_client(
-    ep: Endpoint,
-    cfg: ConnectTo,
-    engine: Engine,
-) -> ! {
-    async fn handle_client_once(ep: &Endpoint, cfg: &ConnectTo, engine: &Engine) -> anyhow::Result<!> {
+async fn handle_client(ep: Endpoint, cfg: ConnectTo, engine: Engine) -> ! {
+    async fn handle_client_once(
+        ep: &Endpoint,
+        cfg: &ConnectTo,
+        engine: &Engine,
+    ) -> anyhow::Result<!> {
         // We don't actually use server_name. Use a dummy IPv4 here.
         let conn = ep.connect(cfg.endpoint, "0.0.0.0")?.await?;
         engine.handle(conn).await

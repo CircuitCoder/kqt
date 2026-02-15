@@ -9,8 +9,8 @@
     const_ops
 )]
 
+pub mod backend;
 pub mod config;
 pub mod crypto;
 pub mod packet;
 pub mod tunnel;
-pub mod backend;

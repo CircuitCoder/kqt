@@ -70,10 +70,7 @@ impl Neighboor {
     }
 
     pub fn outgoing_mtu(&self) -> Option<usize> {
-        let conn = self
-            .incoming
-            .as_ref()
-            .or(self.outgoing.as_ref())?;
+        let conn = self.incoming.as_ref().or(self.outgoing.as_ref())?;
 
         conn.max_datagram_size()
     }
@@ -104,7 +101,9 @@ pub struct Neighboors {
 
 impl Neighboors {
     pub fn new() -> Self {
-        Self { neighboors: Vec::new() }
+        Self {
+            neighboors: Vec::new(),
+        }
     }
 
     pub fn find_neighboor(&mut self, to: &VerifyingKey) -> &mut Neighboor {
