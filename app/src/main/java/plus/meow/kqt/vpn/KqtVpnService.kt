@@ -53,6 +53,14 @@ class KqtVpnService : VpnService() {
             // Build the VPN interface
             val builder = Builder()
 
+            // Add the application itself as an excluded application
+            try {
+                builder.addDisallowedApplication(packageName)
+                Log.i(TAG, "Excluded application: $packageName")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to exclude application: ${e.message}")
+            }
+
             // Set MTU
             builder.setMtu(config.mtu)
 
@@ -74,6 +82,16 @@ class KqtVpnService : VpnService() {
                     builder.addAddress(ip, prefixLength)
                 } catch (e: Exception) {
                     return Result.err(VpnError.ConfigurationFailed("Failed to add address $address: ${e.message}", e))
+                }
+            }
+
+            // Add dns
+            for (dns in config.dnsServers) {
+                try {
+                    builder.addDnsServer(dns)
+                    Log.i(TAG, "Added DNS server: $dns")
+                } catch (e: Exception) {
+                    return Result.err(VpnError.ConfigurationFailed("Failed to add DNS server $dns: ${e.message}", e))
                 }
             }
 
