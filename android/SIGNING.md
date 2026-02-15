@@ -20,7 +20,7 @@ To enable APK signing in GitHub Actions, you need to configure the following sec
 If you don't have a keystore yet, create one using the following command:
 
 ```bash
-keytool -genkey -v -keystore release.keystore -alias your-key-alias -keyalg RSA -keysize 2048 -validity 10000
+keytool -genkeypair -v -keystore release.keystore -alias your-key-alias -keyalg RSA -keysize 2048 -validity 10000
 ```
 
 Follow the prompts to set passwords and fill in the certificate information.
@@ -72,15 +72,6 @@ export KEY_PASSWORD=your-key-password
 
 cd android
 ./gradlew assembleRelease
-```
-
-Alternatively, you can create a `keystore.properties` file (not recommended as it's easy to commit accidentally):
-
-```properties
-storeFile=/path/to/your/release.keystore
-storePassword=your-keystore-password
-keyAlias=your-key-alias
-keyPassword=your-key-password
 ```
 
 **Important**: Never commit your keystore or keystore passwords to version control!
