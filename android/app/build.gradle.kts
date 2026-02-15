@@ -22,10 +22,23 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file(System.getenv("KEYSTORE_FILE") ?: "release.keystore")
-            storePassword = System.getenv("KEYSTORE_PASSWORD")
-            keyAlias = System.getenv("KEY_ALIAS")
-            keyPassword = System.getenv("KEY_PASSWORD")
+            val keystoreFile = System.getenv("KEYSTORE_FILE")
+            val keystorePass = System.getenv("KEYSTORE_PASSWORD")
+            val alias = System.getenv("KEY_ALIAS")
+            val keyPass = System.getenv("KEY_PASSWORD")
+            
+            if (keystoreFile != null && keystorePass != null && alias != null && keyPass != null) {
+                storeFile = file(keystoreFile)
+                storePassword = keystorePass
+                keyAlias = alias
+                keyPassword = keyPass
+            } else {
+                // Fallback for local builds without signing
+                storeFile = file("release.keystore")
+                storePassword = ""
+                keyAlias = ""
+                keyPassword = ""
+            }
         }
     }
 
