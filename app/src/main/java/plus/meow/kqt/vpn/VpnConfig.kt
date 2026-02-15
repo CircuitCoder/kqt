@@ -12,6 +12,7 @@ import uniffi.kqt.SerializedRoute
  */
 data class VpnConfig(
     val addresses: List<String> = emptyList(),
+    val dnsServers: List<String> = emptyList(),
     val routes: List<SerializedRoute> = emptyList(),
     val mtu: Int = 1500
 )

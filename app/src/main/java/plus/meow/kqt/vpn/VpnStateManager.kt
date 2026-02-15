@@ -2,7 +2,6 @@ package plus.meow.kqt.vpn
 
 import android.content.Context
 import android.util.Log
-import androidx.fragment.app.FragmentActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -186,14 +185,18 @@ class VpnStateManager(
     }
 
     /**
+     * Callback for requesting VPN permission.
+     * The callback receives the permission intent that should be launched.
+     */
+    var onPermissionRequired: ((android.content.Intent) -> Unit)? = null
+
+    /**
      * Connect a VPN.
      *
      * @param vpn The VPN configuration entity to connect
-     * @param activity The activity context (for future use with permission requests)
      * @return Result indicating success or error
      */
-    @Suppress("UNUSED_PARAMETER")
-    suspend fun connect(vpn: VpnConfigEntity, activity: FragmentActivity): Result<Unit, VpnStateError> {
+    suspend fun connect(vpn: VpnConfigEntity): Result<Unit, VpnStateError> {
         stateMap.compareAndSetOrGet(vpn.id, VpnState.IDENT_DISCONNECTED, VpnState.Connecting)?.also { cur ->
             return@connect Result.err(VpnStateError.InconsistentState(vpn.id, cur, VpnState.Connecting))
         }
@@ -232,6 +235,8 @@ class VpnStateManager(
         // Check VPN permission
         val permissionIntent = manager.checkPermission()
         if (permissionIntent != null) {
+            // Invoke callback to request permission
+            onPermissionRequired?.invoke(permissionIntent)
             stateMap.set(vpn.id, VpnState.Disconnected)
             return Result.err(VpnStateError.PermissionRequired)
         }
