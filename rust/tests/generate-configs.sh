@@ -38,13 +38,6 @@ listen = "10.0.0.1:$NODE1_LISTEN_PORT"
 endpoint = "10.0.0.2:$NODE2_LISTEN_PORT"
 EOF
 
-# Add designated_range for L3 mode
-if [ "$MODE" = "L3" ]; then
-    cat >> "$OUTPUT_DIR/node1.toml" <<EOF
-designated_range = ["10.21.0.2/32", "fd00::2/128"]
-EOF
-fi
-
 echo "Generating node2 configuration..."
 cat > "$OUTPUT_DIR/node2.toml" <<EOF
 # Node 2 Configuration
@@ -61,13 +54,6 @@ listen = "10.0.0.2:$NODE2_LISTEN_PORT"
 [[connect_to]]
 endpoint = "10.0.0.1:$NODE1_LISTEN_PORT"
 EOF
-
-# Add designated_range for L3 mode
-if [ "$MODE" = "L3" ]; then
-    cat >> "$OUTPUT_DIR/node2.toml" <<EOF
-designated_range = ["10.21.0.1/32", "fd00::1/128"]
-EOF
-fi
 
 echo "Configuration files generated successfully ($MODE mode):"
 echo "  - $OUTPUT_DIR/node1.toml"
