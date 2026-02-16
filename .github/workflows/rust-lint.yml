@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: true
 
       - name: Install Rust nightly
         uses: dtolnay/rust-toolchain@master
@@ -25,7 +27,7 @@ jobs:
 
       - name: Check formatting
         working-directory: ./rust
-        run: cargo fmt --all -- --check
+        run: cargo fmt --package kqt --package kqt-lib --package kqt-kotlin --package kqt-tester -- --check
 
   unused-deps:
     name: Check Unused Dependencies
@@ -35,6 +37,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: true
 
       - name: Install Rust nightly
         uses: dtolnay/rust-toolchain@master
