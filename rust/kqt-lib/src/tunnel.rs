@@ -74,7 +74,7 @@ impl Config {
                 .layer(self.mode.to_tun_layer())
                 .build_async()?,
             #[cfg(any(unix))]
-            IfaceSetup::Fd { fd, .. } => unsafe { tun_rs::AsyncDevice::from_fd(*fd)? },
+            IfaceSetup::Fd { fd, .. } => unsafe { tun_rs::AsyncDevice::borrow_raw(*fd)? },
         };
 
         #[cfg(not(target_os = "android"))]
