@@ -87,14 +87,33 @@ jobs:
         id: version-info
         working-directory: ./android
         shell: bash
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
-          VERSION=$(./gradlew -q properties | grep -E "^versionName:" | awk '{print $2}')
+          # Check if gradlew is executable
+          if [ ! -x ./gradlew ]; then
+            echo "Error: gradlew is not executable"
+            exit 1
+          fi
+          
+          # Try to get properties with error output
+          echo "Running gradle properties..."
+          PROPS_OUTPUT=$(./gradlew -q properties 2>&1) || {
+            echo "Error: gradlew properties failed with exit code $?"
+            echo "Output: $PROPS_OUTPUT"
+            exit 1
+          }
+          
+          # Extract version name
+          VERSION=$(echo "$PROPS_OUTPUT" | grep -E "^versionName:" | awk '{print $2}')
+          
           if [ -z "$VERSION" ]; then
             echo "Error: Could not extract version name from gradle properties"
             echo "Gradle properties output:"
-            ./gradlew -q properties | head -20
+            echo "$PROPS_OUTPUT" | head -20
             exit 1
           fi
+          
           echo "Extracted version: $VERSION"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
