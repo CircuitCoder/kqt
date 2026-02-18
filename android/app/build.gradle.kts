@@ -86,7 +86,7 @@ tasks.register<Copy>("collectAndRenameApks") {
 
     // Flattening and Renaming Logic
     eachFile {
-        val matcher = "(.*)-(.*)-(.*)\\.apk".toRegex().matchEntire(name)
+        val matcher = "(.*)-(arm64-v8a|armeabi-v7a|universal)-(.*)\\.apk".toRegex().matchEntire(name)
 
         if (matcher != null) {
             val (prefix, abi, buildType) = matcher.destructured
