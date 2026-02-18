@@ -20,7 +20,7 @@ android {
         }
     }
 
-    val keystorePassword = System.getenv("KEYSTORE_PASSWORD")
+    val keystorePassword = System.getenv("KEYSTORE_PASSWORD")?.trim()
 
     signingConfigs {
         create("release") {
