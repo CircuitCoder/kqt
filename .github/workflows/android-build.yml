@@ -83,50 +83,6 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: ./gradlew assembleRelease --stacktrace
 
-      - name: Get version from APK
-        id: version-info
-        shell: bash
-        run: |
-          # Extract version from a universal APK using aapt
-          # We use debug APK since it's built first and has the same version as release
-          # Use wildcard to match the actual APK name (e.g., app-universal-debug.apk)
-          APK_PATH=$(ls android/app/build/outputs/apk/debug/*universal*.apk 2>/dev/null | head -1)
-          
-          if [ -z "$APK_PATH" ] || [ ! -f "$APK_PATH" ]; then
-            echo "Error: Universal APK not found in debug directory"
-            echo "Looking in: android/app/build/outputs/apk/debug/"
-            ls -la android/app/build/outputs/apk/debug/ || echo "Debug directory does not exist"
-            exit 1
-          fi
-          
-          echo "Using APK: $APK_PATH"
-          
-          # Check if aapt is available
-          if ! command -v aapt &> /dev/null; then
-            echo "Error: aapt command not found in PATH"
-            echo "Make sure Android SDK is properly set up"
-            exit 1
-          fi
-          
-          # Use aapt to extract version name from APK
-          AAPT_OUTPUT=$(aapt dump badging "$APK_PATH" 2>&1) || {
-            echo "Error: aapt command failed with exit code $?"
-            echo "Output: $AAPT_OUTPUT"
-            exit 1
-          }
-          
-          VERSION=$(echo "$AAPT_OUTPUT" | grep "versionName" | sed -E "s/.*versionName='([^']+)'.*/\1/")
-          
-          if [ -z "$VERSION" ]; then
-            echo "Error: Could not extract version name from APK"
-            echo "aapt output (first 20 lines):"
-            echo "$AAPT_OUTPUT" | head -20
-            exit 1
-          fi
-          
-          echo "Extracted version from APK: $VERSION"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
       - name: Check if signed
         id: signing-status
         shell: bash
@@ -139,19 +95,49 @@ jobs:
             echo "signed=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Rename debug APKs
+      - name: Collect and rename APKs
         shell: bash
-        run: ./.github/scripts/rename-apks.sh debug ${{ steps.version-info.outputs.version }} ${{ steps.git-info.outputs.sha_short }} ${{ steps.signing-status.outputs.signed }}
-
-      - name: Rename release APKs
-        shell: bash
-        run: ./.github/scripts/rename-apks.sh release ${{ steps.version-info.outputs.version }} ${{ steps.git-info.outputs.sha_short }} ${{ steps.signing-status.outputs.signed }}
+        run: |
+          # Create collection directory
+          mkdir -p apk-collection
+          
+          COMMIT_HASH=${{ steps.git-info.outputs.sha_short }}
+          SIGNED=${{ steps.signing-status.outputs.signed }}
+          
+          # Determine suffix based on signing status
+          SUFFIX=""
+          if [ "$SIGNED" != "true" ]; then
+            SUFFIX="-UNSIGNED"
+          fi
+          
+          # Collect debug APKs
+          for apk in android/app/build/outputs/apk/debug/kqt-*.apk; do
+            if [ -f "$apk" ]; then
+              filename=$(basename "$apk")
+              # Insert commit hash before .apk extension
+              new_name="${filename%.apk}-${COMMIT_HASH}${SUFFIX}.apk"
+              cp "$apk" "apk-collection/$new_name"
+              echo "Collected: $new_name"
+            fi
+          done
+          
+          # Collect release APKs
+          for apk in android/app/build/outputs/apk/release/kqt-*.apk; do
+            if [ -f "$apk" ]; then
+              filename=$(basename "$apk")
+              # Insert commit hash before .apk extension
+              new_name="${filename%.apk}-${COMMIT_HASH}${SUFFIX}.apk"
+              cp "$apk" "apk-collection/$new_name"
+              echo "Collected: $new_name"
+            fi
+          done
+          
+          echo "All collected APKs:"
+          ls -1 apk-collection/
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
-          name: kqt-apks-${{ steps.version-info.outputs.version }}-${{ steps.git-info.outputs.sha_short }}
-          path: |
-            android/app/build/outputs/apk/debug/kqt-*.apk
-            android/app/build/outputs/apk/release/kqt-*.apk
+          name: kqt-apks-${{ steps.git-info.outputs.sha_short }}
+          path: apk-collection/*.apk
           if-no-files-found: error
