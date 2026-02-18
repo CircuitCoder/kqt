@@ -1,0 +1,29 @@
+#!/bin/bash
+# Script to rename APK files with standard naming convention
+# Usage: rename-apks.sh <build-type> <version> <commit>
+
+set -e
+
+BUILD_TYPE=$1
+VERSION=$2
+COMMIT=$3
+
+if [ -z "$BUILD_TYPE" ] || [ -z "$VERSION" ] || [ -z "$COMMIT" ]; then
+    echo "Usage: $0 <build-type> <version> <commit>"
+    exit 1
+fi
+
+cd "android/app/build/outputs/apk/$BUILD_TYPE"
+
+for apk in *.apk; do
+    if [[ "$apk" == *"arm64-v8a"* ]]; then
+        mv "$apk" "kqt-$BUILD_TYPE-arm64-v8a-$VERSION-$COMMIT.apk"
+    elif [[ "$apk" == *"armeabi-v7a"* ]]; then
+        mv "$apk" "kqt-$BUILD_TYPE-armeabi-v7a-$VERSION-$COMMIT.apk"
+    elif [[ "$apk" == *"universal"* ]]; then
+        mv "$apk" "kqt-$BUILD_TYPE-universal-$VERSION-$COMMIT.apk"
+    fi
+done
+
+echo "Renamed APKs in $BUILD_TYPE:"
+ls -1 *.apk

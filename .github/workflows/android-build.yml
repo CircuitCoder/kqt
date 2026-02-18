@@ -83,38 +83,19 @@ jobs:
 
       - name: Get version name
         id: version-info
+        working-directory: ./android
         shell: bash
         run: |
-          VERSION=$(grep "versionName" android/app/build.gradle.kts | sed -E 's/.*versionName = "(.*)"/\1/')
+          VERSION=$(./gradlew -q properties --property versionName | grep "^versionName:" | awk '{print $2}')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Rename debug APKs
         shell: bash
-        run: |
-          cd android/app/build/outputs/apk/debug
-          for apk in *.apk; do
-            if [[ "$apk" == *"arm64-v8a"* ]]; then
-              mv "$apk" "kqt-debug-arm64-v8a-${{ steps.version-info.outputs.version }}-${{ steps.git-info.outputs.sha_short }}.apk"
-            elif [[ "$apk" == *"armeabi-v7a"* ]]; then
-              mv "$apk" "kqt-debug-armeabi-v7a-${{ steps.version-info.outputs.version }}-${{ steps.git-info.outputs.sha_short }}.apk"
-            elif [[ "$apk" == *"universal"* ]]; then
-              mv "$apk" "kqt-debug-universal-${{ steps.version-info.outputs.version }}-${{ steps.git-info.outputs.sha_short }}.apk"
-            fi
-          done
+        run: ./.github/scripts/rename-apks.sh debug ${{ steps.version-info.outputs.version }} ${{ steps.git-info.outputs.sha_short }}
 
       - name: Rename release APKs
         shell: bash
-        run: |
-          cd android/app/build/outputs/apk/release
-          for apk in *.apk; do
-            if [[ "$apk" == *"arm64-v8a"* ]]; then
-              mv "$apk" "kqt-release-arm64-v8a-${{ steps.version-info.outputs.version }}-${{ steps.git-info.outputs.sha_short }}.apk"
-            elif [[ "$apk" == *"armeabi-v7a"* ]]; then
-              mv "$apk" "kqt-release-armeabi-v7a-${{ steps.version-info.outputs.version }}-${{ steps.git-info.outputs.sha_short }}.apk"
-            elif [[ "$apk" == *"universal"* ]]; then
-              mv "$apk" "kqt-release-universal-${{ steps.version-info.outputs.version }}-${{ steps.git-info.outputs.sha_short }}.apk"
-            fi
-          done
+        run: ./.github/scripts/rename-apks.sh release ${{ steps.version-info.outputs.version }} ${{ steps.git-info.outputs.sha_short }}
 
       - name: Upload debug arm64-v8a APK
         uses: actions/upload-artifact@v4

@@ -23,9 +23,9 @@ android {
     signingConfigs {
         create("release") {
             storeFile = file("keys/ci.keystore")
-            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
+            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: error("KEYSTORE_PASSWORD environment variable is required")
             keyAlias = "apk"
-            keyPassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
+            keyPassword = System.getenv("KEYSTORE_PASSWORD") ?: error("KEYSTORE_PASSWORD environment variable is required")
         }
     }
 
