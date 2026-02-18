@@ -83,38 +83,29 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: ./gradlew assembleRelease --stacktrace
 
-      - name: Get version name
+      - name: Get version from APK
         id: version-info
-        working-directory: ./android
         shell: bash
-        env:
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
-          # Check if gradlew is executable
-          if [ ! -x ./gradlew ]; then
-            echo "Error: gradlew is not executable"
+          # Extract version from the universal debug APK using aapt
+          APK_PATH="android/app/build/outputs/apk/debug/app-universal-debug.apk"
+          
+          if [ ! -f "$APK_PATH" ]; then
+            echo "Error: Universal debug APK not found at $APK_PATH"
+            ls -la android/app/build/outputs/apk/debug/ || echo "Debug directory does not exist"
             exit 1
           fi
           
-          # Try to get properties with error output
-          echo "Running gradle properties..."
-          PROPS_OUTPUT=$(./gradlew -q properties 2>&1) || {
-            echo "Error: gradlew properties failed with exit code $?"
-            echo "Output: $PROPS_OUTPUT"
-            exit 1
-          }
-          
-          # Extract version name
-          VERSION=$(echo "$PROPS_OUTPUT" | grep -E "^versionName:" | awk '{print $2}')
+          # Use aapt to extract version name from APK
+          VERSION=$(aapt dump badging "$APK_PATH" | grep "versionName" | sed -E "s/.*versionName='([^']+)'.*/\1/")
           
           if [ -z "$VERSION" ]; then
-            echo "Error: Could not extract version name from gradle properties"
-            echo "Gradle properties output:"
-            echo "$PROPS_OUTPUT" | head -20
+            echo "Error: Could not extract version name from APK"
+            aapt dump badging "$APK_PATH" | head -20
             exit 1
           fi
           
-          echo "Extracted version: $VERSION"
+          echo "Extracted version from APK: $VERSION"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Check if signed
