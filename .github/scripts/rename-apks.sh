@@ -29,10 +29,13 @@ shopt -s nullglob
 for apk in *.apk; do
     if [[ "$apk" == *"arm64-v8a"* ]]; then
         mv "$apk" "kqt-$BUILD_TYPE-arm64-v8a-$VERSION-$COMMIT.apk"
+        continue
     elif [[ "$apk" == *"armeabi-v7a"* ]]; then
         mv "$apk" "kqt-$BUILD_TYPE-armeabi-v7a-$VERSION-$COMMIT.apk"
+        continue
     elif [[ "$apk" == *"universal"* ]]; then
         mv "$apk" "kqt-$BUILD_TYPE-universal-$VERSION-$COMMIT.apk"
+        continue
     else
         echo "Warning: Unexpected APK file does not match known patterns: $apk"
     fi
