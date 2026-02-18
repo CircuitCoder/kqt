@@ -86,11 +86,14 @@ jobs:
         working-directory: ./android
         shell: bash
         run: |
-          VERSION=$(./gradlew -q properties | grep "^versionName:" | awk '{print $2}')
+          VERSION=$(./gradlew -q properties | grep -E "^versionName:" | awk '{print $2}')
           if [ -z "$VERSION" ]; then
             echo "Error: Could not extract version name from gradle properties"
+            echo "Gradle properties output:"
+            ./gradlew -q properties | head -20
             exit 1
           fi
+          echo "Extracted version: $VERSION"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Rename debug APKs

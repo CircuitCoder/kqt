@@ -39,4 +39,8 @@ for apk in *.apk; do
 done
 
 echo "Renamed APKs in $BUILD_TYPE:"
-ls -1 *.apk
+if ls *.apk >/dev/null 2>&1; then
+    ls -1 *.apk
+else
+    echo "Warning: No APK files found in $APK_DIR"
+fi
