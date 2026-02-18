@@ -47,13 +47,18 @@ If you need to regenerate the CI keystore (e.g., if compromised), use:
 
 ```bash
 cd android/app/keys
-keytool -genkeypair -v -keystore ci.keystore -alias apk \
-  -keyalg EC -keysize 256 -validity 3650 -storetype PKCS12 \
-  -storepass "your-password" -keypass "your-password" \
-  -dname "CN=KQT CI, OU=Development, O=KQT, L=Unknown, ST=Unknown, C=US"
+keytool -genkeypair -v -keystore ci.keystore -alias apk -keyalg EC -validity 3650
 ```
 
-Replace `"your-password"` with your chosen password, and update the `KEYSTORE_PASSWORD` secret in GitHub.
+This command will interactively prompt you for:
+- Keystore password (enter it twice for confirmation)
+- Key password (you can press Enter to use the same password as the keystore)
+- Your name, organizational unit, organization, city, state, and country
+
+**Notes:**
+- The key password can be the same as the keystore password (press Enter when prompted for key password)
+- PKCS12 is the default keystore type in modern keytool versions
+- After creating the keystore, update the `KEYSTORE_PASSWORD` secret in GitHub with the password you chose
 
 ## Local Development
 
