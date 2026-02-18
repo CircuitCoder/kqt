@@ -98,13 +98,23 @@ jobs:
           echo "Extracted version: $VERSION"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
+      - name: Check if signed
+        id: signing-status
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.KEYSTORE_PASSWORD }}" ]; then
+            echo "signed=true" >> $GITHUB_OUTPUT
+          else
+            echo "signed=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Rename debug APKs
         shell: bash
-        run: ./.github/scripts/rename-apks.sh debug ${{ steps.version-info.outputs.version }} ${{ steps.git-info.outputs.sha_short }}
+        run: ./.github/scripts/rename-apks.sh debug ${{ steps.version-info.outputs.version }} ${{ steps.git-info.outputs.sha_short }} ${{ steps.signing-status.outputs.signed }}
 
       - name: Rename release APKs
         shell: bash
-        run: ./.github/scripts/rename-apks.sh release ${{ steps.version-info.outputs.version }} ${{ steps.git-info.outputs.sha_short }}
+        run: ./.github/scripts/rename-apks.sh release ${{ steps.version-info.outputs.version }} ${{ steps.git-info.outputs.sha_short }} ${{ steps.signing-status.outputs.signed }}
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4

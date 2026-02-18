@@ -1,15 +1,16 @@
 #!/bin/bash
 # Script to rename APK files with standard naming convention
-# Usage: rename-apks.sh <build-type> <version> <commit>
+# Usage: rename-apks.sh <build-type> <version> <commit> [signed]
 
 set -e
 
 BUILD_TYPE=$1
 VERSION=$2
 COMMIT=$3
+SIGNED=${4:-"false"}
 
 if [ -z "$BUILD_TYPE" ] || [ -z "$VERSION" ] || [ -z "$COMMIT" ]; then
-    echo "Usage: $0 <build-type> <version> <commit>"
+    echo "Usage: $0 <build-type> <version> <commit> [signed]"
     exit 1
 fi
 
@@ -26,15 +27,21 @@ cd "$APK_DIR"
 # Enable nullglob to handle case where no APK files exist
 shopt -s nullglob
 
+# Determine suffix based on signing status
+SUFFIX=""
+if [ "$SIGNED" != "true" ]; then
+    SUFFIX="-UNSIGNED"
+fi
+
 for apk in *.apk; do
     if [[ "$apk" == *"arm64-v8a"* ]]; then
-        mv "$apk" "kqt-$BUILD_TYPE-arm64-v8a-$VERSION-$COMMIT.apk"
+        mv "$apk" "kqt-$BUILD_TYPE-arm64-v8a-$VERSION-$COMMIT$SUFFIX.apk"
         continue
     elif [[ "$apk" == *"armeabi-v7a"* ]]; then
-        mv "$apk" "kqt-$BUILD_TYPE-armeabi-v7a-$VERSION-$COMMIT.apk"
+        mv "$apk" "kqt-$BUILD_TYPE-armeabi-v7a-$VERSION-$COMMIT$SUFFIX.apk"
         continue
     elif [[ "$apk" == *"universal"* ]]; then
-        mv "$apk" "kqt-$BUILD_TYPE-universal-$VERSION-$COMMIT.apk"
+        mv "$apk" "kqt-$BUILD_TYPE-universal-$VERSION-$COMMIT$SUFFIX.apk"
         continue
     else
         echo "Warning: Unexpected APK file does not match known patterns: $apk"
