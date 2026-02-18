@@ -1,3 +1,5 @@
+import com.android.build.OutputFile
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.ksp)
@@ -65,6 +67,24 @@ android {
     compileOptions {
         sourceCompatibility = org.gradle.api.JavaVersion.VERSION_17
         targetCompatibility = org.gradle.api.JavaVersion.VERSION_17
+    }
+}
+
+val appExtension = components.findByName("android")
+    ?: extensions.getByType(com.android.build.gradle.AppExtension::class.java)
+
+if (appExtension is com.android.build.gradle.AppExtension) {
+    appExtension.applicationVariants.all {
+        val variant = this
+        outputs.all {
+            val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
+
+            // Safe filter extraction
+            val abi = output.getFilter(OutputFile.ABI) ?: "universal"
+
+            // Set the name
+            output.outputFileName = "kqt-${abi}-${variant.versionName}-${variant.buildType.name}.apk"
+        }
     }
 }
 
