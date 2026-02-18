@@ -70,22 +70,50 @@ android {
     }
 }
 
-val appExtension = components.findByName("android")
-    ?: extensions.getByType(com.android.build.gradle.AppExtension::class.java)
+tasks.register<Copy>("collectAndRenameApks") {
+    description = "Copies, flattens, and renames APKs to the upload directory"
+    group = "distribution"
 
-if (appExtension is com.android.build.gradle.AppExtension) {
-    appExtension.applicationVariants.all {
-        val variant = this
-        outputs.all {
-            val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
+    // Source: The standard output directory
+    from(layout.buildDirectory.dir("outputs/apk"))
 
-            // Safe filter extraction
-            val abi = output.getFilter(OutputFile.ABI) ?: "universal"
+    // Destination: Your upload folder
+    into(layout.buildDirectory.dir("outputs/collected"))
 
-            // Set the name
-            output.outputFileName = "kqt-${abi}-${variant.versionName}-${variant.buildType.name}.apk"
+    include("**/*.apk")
+
+    // Flattening and Renaming Logic
+    eachFile {
+        // 'this' is a FileCopyDetails object
+        // The 'path' property includes the relative path, e.g., "release/app-x86-release.apk"
+        // The 'name' property is just the filename, e.g., "app-x86-release.apk"
+
+        // Regex to parse the standard Gradle output name: "app-[abi]-[buildType].apk"
+        // Pattern matches: "app-" followed by (ABI) followed by "-" followed by (BuildType)
+        val matcher = "(.*)-(.*)-(.*)\\.apk".toRegex().matchEntire(name)
+        val android = project.extensions.getByType(com.android.build.gradle.BaseExtension::class.java)
+        val appVersionName = android.defaultConfig.versionName
+        val appName = "kqt"
+
+        if (matcher != null) {
+            val (prefix, abi, buildType) = matcher.destructured
+
+            // Construct your custom name: some-name-[abi]-[version]-[buildType].apk
+            // We ignore the original prefix ("app") and use your 'appName' variable
+            path = "$appName-$abi-$appVersionName-$buildType.apk"
+        } else {
+            // Fallback for files that don't match the split pattern (like universal if named differently)
+            // Tries to insert the version name before the .apk extension
+            path = name.replace(".apk", "-$appVersionName.apk")
         }
     }
+
+    // Ensure we don't copy the empty "debug"/"release" folders
+    includeEmptyDirs = false
+}
+
+tasks.named("assemble") {
+    finalizedBy("collectAndRenameApks")
 }
 
 kotlin {
