@@ -87,12 +87,13 @@ jobs:
         id: version-info
         shell: bash
         run: |
-          # Extract version from the universal debug APK using aapt
+          # Extract version from a universal APK using aapt
+          # We use debug APK since it's built first and has the same version as release
           # Use wildcard to match the actual APK name (e.g., app-universal-debug.apk)
           APK_PATH=$(ls android/app/build/outputs/apk/debug/*universal*.apk 2>/dev/null | head -1)
           
           if [ -z "$APK_PATH" ] || [ ! -f "$APK_PATH" ]; then
-            echo "Error: Universal debug APK not found"
+            echo "Error: Universal APK not found in debug directory"
             echo "Looking in: android/app/build/outputs/apk/debug/"
             ls -la android/app/build/outputs/apk/debug/ || echo "Debug directory does not exist"
             exit 1
