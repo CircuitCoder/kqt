@@ -99,7 +99,7 @@ jobs:
         shell: bash
         run: |
           # Create collection directory
-          mkdir -p apk-collection
+          mkdir -p upload
           
           COMMIT_HASH="${{ steps.git-info.outputs.sha_short }}"
           SIGNED="${{ steps.signing-status.outputs.signed }}"
@@ -110,34 +110,23 @@ jobs:
             SUFFIX="-UNSIGNED"
           fi
           
-          # Collect debug APKs
-          for apk in android/app/build/outputs/apk/debug/kqt-*.apk; do
+          # Collect APKs
+          for apk in android/app/build/outputs/collected/kqt-*.apk; do
             if [ -f "$apk" ]; then
               filename=$(basename "$apk")
               # Insert commit hash before .apk extension
               new_name="${filename%.apk}-${COMMIT_HASH}${SUFFIX}.apk"
-              cp "$apk" "apk-collection/$new_name"
-              echo "Collected: $new_name"
-            fi
-          done
-          
-          # Collect release APKs
-          for apk in android/app/build/outputs/apk/release/kqt-*.apk; do
-            if [ -f "$apk" ]; then
-              filename=$(basename "$apk")
-              # Insert commit hash before .apk extension
-              new_name="${filename%.apk}-${COMMIT_HASH}${SUFFIX}.apk"
-              cp "$apk" "apk-collection/$new_name"
+              cp "$apk" "upload/$new_name"
               echo "Collected: $new_name"
             fi
           done
           
           echo "All collected APKs:"
-          ls -1 apk-collection/
+          ls -1 upload/
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
           name: kqt-apks-${{ steps.git-info.outputs.sha_short }}
-          path: apk-collection/*.apk
+          path: upload/*.apk
           if-no-files-found: error
