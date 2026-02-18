@@ -20,9 +20,10 @@ android {
         }
     }
 
+    val keystorePassword = System.getenv("KEYSTORE_PASSWORD")
+
     signingConfigs {
         create("release") {
-            val keystorePassword = System.getenv("KEYSTORE_PASSWORD")
             if (keystorePassword != null) {
                 storeFile = file("keys/ci.keystore")
                 storePassword = keystorePassword
@@ -35,7 +36,7 @@ android {
     buildTypes {
         debug {
             // Only sign if KEYSTORE_PASSWORD is available
-            if (System.getenv("KEYSTORE_PASSWORD") != null) {
+            if (keystorePassword != null) {
                 signingConfig = signingConfigs.getByName("release")
             }
         }
@@ -46,7 +47,7 @@ android {
                 "proguard-rules.pro"
             )
             // Only sign if KEYSTORE_PASSWORD is available
-            if (System.getenv("KEYSTORE_PASSWORD") != null) {
+            if (keystorePassword != null) {
                 signingConfig = signingConfigs.getByName("release")
             }
         }
