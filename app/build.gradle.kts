@@ -22,7 +22,7 @@ android {
 
     signingConfigs {
         create("release") {
-            val keystorePassword = System.getenv("KEYSTORE_PASSWORD") 
+            val keystorePassword = System.getenv("KEYSTORE_PASSWORD")
                 ?: error("KEYSTORE_PASSWORD environment variable is required")
             storeFile = file("keys/ci.keystore")
             storePassword = keystorePassword
