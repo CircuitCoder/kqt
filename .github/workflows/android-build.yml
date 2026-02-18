@@ -101,8 +101,8 @@ jobs:
           # Create collection directory
           mkdir -p apk-collection
           
-          COMMIT_HASH=${{ steps.git-info.outputs.sha_short }}
-          SIGNED=${{ steps.signing-status.outputs.signed }}
+          COMMIT_HASH="${{ steps.git-info.outputs.sha_short }}"
+          SIGNED="${{ steps.signing-status.outputs.signed }}"
           
           # Determine suffix based on signing status
           SUFFIX=""
