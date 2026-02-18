@@ -13,7 +13,15 @@ if [ -z "$BUILD_TYPE" ] || [ -z "$VERSION" ] || [ -z "$COMMIT" ]; then
     exit 1
 fi
 
-cd "android/app/build/outputs/apk/$BUILD_TYPE"
+APK_DIR="android/app/build/outputs/apk/$BUILD_TYPE"
+
+if [ ! -d "$APK_DIR" ]; then
+    echo "Error: APK directory does not exist: $APK_DIR"
+    echo "Make sure the build has completed successfully before renaming APKs"
+    exit 1
+fi
+
+cd "$APK_DIR"
 
 # Enable nullglob to handle case where no APK files exist
 shopt -s nullglob
