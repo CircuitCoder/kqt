@@ -23,17 +23,21 @@ android {
     signingConfigs {
         create("release") {
             val keystorePassword = System.getenv("KEYSTORE_PASSWORD")
-                ?: error("KEYSTORE_PASSWORD environment variable is required")
-            storeFile = file("keys/ci.keystore")
-            storePassword = keystorePassword
-            keyAlias = "apk"
-            keyPassword = keystorePassword
+            if (keystorePassword != null) {
+                storeFile = file("keys/ci.keystore")
+                storePassword = keystorePassword
+                keyAlias = "apk"
+                keyPassword = keystorePassword
+            }
         }
     }
 
     buildTypes {
         debug {
-            signingConfig = signingConfigs.getByName("release")
+            // Only sign if KEYSTORE_PASSWORD is available
+            if (System.getenv("KEYSTORE_PASSWORD") != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
         release {
             isMinifyEnabled = false
@@ -41,7 +45,10 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("release")
+            // Only sign if KEYSTORE_PASSWORD is available
+            if (System.getenv("KEYSTORE_PASSWORD") != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     
