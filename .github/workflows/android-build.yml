@@ -83,6 +83,10 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: ./gradlew assembleRelease --stacktrace
 
+      - name: Collect and rename APKs
+        working-directory: ./android
+        run: ./gradlew collectAndRenameApks --stacktrace
+
       - name: Check if signed
         id: signing-status
         shell: bash
