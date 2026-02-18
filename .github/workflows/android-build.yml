@@ -100,12 +100,26 @@ jobs:
           
           echo "Using APK: $APK_PATH"
           
+          # Check if aapt is available
+          if ! command -v aapt &> /dev/null; then
+            echo "Error: aapt command not found in PATH"
+            echo "Make sure Android SDK is properly set up"
+            exit 1
+          fi
+          
           # Use aapt to extract version name from APK
-          VERSION=$(aapt dump badging "$APK_PATH" | grep "versionName" | sed -E "s/.*versionName='([^']+)'.*/\1/")
+          AAPT_OUTPUT=$(aapt dump badging "$APK_PATH" 2>&1) || {
+            echo "Error: aapt command failed with exit code $?"
+            echo "Output: $AAPT_OUTPUT"
+            exit 1
+          }
+          
+          VERSION=$(echo "$AAPT_OUTPUT" | grep "versionName" | sed -E "s/.*versionName='([^']+)'.*/\1/")
           
           if [ -z "$VERSION" ]; then
             echo "Error: Could not extract version name from APK"
-            aapt dump badging "$APK_PATH" | head -20
+            echo "aapt output (first 20 lines):"
+            echo "$AAPT_OUTPUT" | head -20
             exit 1
           fi
           
