@@ -7,7 +7,7 @@ set -e
 BUILD_TYPE=$1
 VERSION=$2
 COMMIT=$3
-SIGNED=${4:-"false"}
+SIGNED=${4:-false}
 
 if [ -z "$BUILD_TYPE" ] || [ -z "$VERSION" ] || [ -z "$COMMIT" ]; then
     echo "Usage: $0 <build-type> <version> <commit> [signed]"

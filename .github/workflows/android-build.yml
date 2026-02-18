@@ -101,8 +101,10 @@ jobs:
       - name: Check if signed
         id: signing-status
         shell: bash
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
-          if [ -n "${{ secrets.KEYSTORE_PASSWORD }}" ]; then
+          if [ -n "$KEYSTORE_PASSWORD" ]; then
             echo "signed=true" >> $GITHUB_OUTPUT
           else
             echo "signed=false" >> $GITHUB_OUTPUT
