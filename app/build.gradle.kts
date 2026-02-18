@@ -20,26 +20,12 @@ android {
         }
     }
 
-    // Helper function to check if signing credentials are available
-    val hasSigningCredentials = {
-        val keystoreFile = System.getenv("KEYSTORE_FILE")
-        val keystorePass = System.getenv("KEYSTORE_PASSWORD")
-        val alias = System.getenv("KEY_ALIAS")
-        val keyPass = System.getenv("KEY_PASSWORD")
-        keystoreFile != null && keystorePass != null && alias != null && keyPass != null
-    }
-
     signingConfigs {
         create("release") {
-            if (hasSigningCredentials()) {
-                val keystoreFilePath = System.getenv("KEYSTORE_FILE")!!
-                storeFile = file(keystoreFilePath)
-                storePassword = System.getenv("KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("KEY_ALIAS")
-                keyPassword = System.getenv("KEY_PASSWORD")
-            }
-            // If environment variables are not set, signing will be skipped
-            // This allows the build to complete without signing credentials
+            storeFile = file("keys/ci.keystore")
+            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
+            keyAlias = "apk"
+            keyPassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
         }
     }
 
@@ -50,10 +36,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // Only apply signing config if all credentials are available
-            if (hasSigningCredentials()) {
-                signingConfig = signingConfigs.getByName("release")
-            }
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     

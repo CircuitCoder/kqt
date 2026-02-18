@@ -2,82 +2,88 @@
 
 ## Overview
 
-This document describes how to configure APK signing for the Android build workflow.
+This document describes the APK signing setup for the Android build workflow.
+
+## CI Keystore
+
+The repository includes a debug signing keystore at `android/app/keys/ci.keystore` that is used for signing APKs in CI builds.
+
+### Keystore Details
+
+- **Location**: `android/app/keys/ci.keystore`
+- **Alias**: `apk`
+- **Algorithm**: ECDSA (EC with 256-bit key)
+- **Format**: PKCS12
+- **Validity**: 10 years
+
+This is a **debug signing keystore** used only for development and CI builds. It is password-protected and committed to the repository for convenience.
 
 ## GitHub Secrets Setup
 
-To enable APK signing in GitHub Actions, you need to configure the following secrets in your repository:
+To enable APK signing in GitHub Actions, you need to configure the following secret:
 
-### Required Secrets
+### Required Secret
 
-1. **KEYSTORE_BASE64**: Base64-encoded keystore file
-2. **KEYSTORE_PASSWORD**: Password for the keystore
-3. **KEY_ALIAS**: Alias of the key in the keystore
-4. **KEY_PASSWORD**: Password for the key
+- **KEYSTORE_PASSWORD**: Password for the CI keystore
 
-### Creating a Keystore
-
-If you don't have a keystore yet, create one using the following command:
-
-```bash
-keytool -genkeypair -v -keystore release.keystore -alias your-key-alias -keyalg RSA -keysize 2048 -validity 3650
-```
-
-This creates a keystore valid for 10 years (3650 days). Follow the prompts to set passwords and fill in the certificate information.
-
-### Encoding the Keystore
-
-To encode your keystore file to base64:
-
-```bash
-base64 -i release.keystore -o keystore.txt
-```
-
-On some systems (like macOS), you might need to use:
-
-```bash
-base64 -i release.keystore
-```
-
-Copy the entire output (it will be a long string).
-
-### Adding Secrets to GitHub
+### Adding Secret to GitHub
 
 1. Go to your repository on GitHub
 2. Navigate to **Settings** → **Secrets and variables** → **Actions**
 3. Click **New repository secret**
-4. Add each of the four secrets:
-   - `KEYSTORE_BASE64`: Paste the base64-encoded keystore
-   - `KEYSTORE_PASSWORD`: Enter your keystore password
-   - `KEY_ALIAS`: Enter your key alias
-   - `KEY_PASSWORD`: Enter your key password
+4. Add the secret:
+   - Name: `KEYSTORE_PASSWORD`
+   - Value: The keystore password
 
 ## Workflow Behavior
 
-- **Pull Requests**: APKs are built but not signed (to protect secrets from untrusted code)
-- **Push to main/master**: APKs are built and signed if secrets are configured
-- **Manual dispatch**: APKs are built and signed if secrets are configured
+- **All branches**: APKs are built and signed using the CI keystore
+- The keystore password is provided via the `KEYSTORE_PASSWORD` secret
+- If the secret is not configured, builds may fail or produce unsigned APKs
 
-If the `KEYSTORE_BASE64` secret is not found, the workflow will log a warning and continue without signing.
+## Creating a New CI Keystore
+
+If you need to regenerate the CI keystore (e.g., if compromised), use:
+
+```bash
+cd android/app/keys
+keytool -genkeypair -v -keystore ci.keystore -alias apk \
+  -keyalg EC -keysize 256 -validity 3650 -storetype PKCS12 \
+  -storepass "your-password" -keypass "your-password" \
+  -dname "CN=KQT CI, OU=Development, O=KQT, L=Unknown, ST=Unknown, C=US"
+```
+
+Replace `"your-password"` with your chosen password, and update the `KEYSTORE_PASSWORD` secret in GitHub.
 
 ## Local Development
 
-For local builds, you can set environment variables:
+For local builds, set the environment variable:
 
 ```bash
-export KEYSTORE_FILE=/path/to/your/release.keystore
 export KEYSTORE_PASSWORD=your-keystore-password
-export KEY_ALIAS=your-key-alias
-export KEY_PASSWORD=your-key-password
-
 cd android
 ./gradlew assembleRelease
 ```
 
-**Important**: Never commit your keystore or keystore passwords to version control!
+Or provide the password inline:
+
+```bash
+cd android
+KEYSTORE_PASSWORD=your-keystore-password ./gradlew assembleRelease
+```
+
+## Production Signing
+
+**Important**: The CI keystore is for **development and testing only**. For production releases to the Google Play Store:
+
+1. Create a separate production keystore with strong security
+2. Store it securely (not in version control)
+3. Use a different signing configuration for production builds
+4. Never share or commit your production keystore
 
 ## Security Notes
 
-- The keystore file is automatically excluded from git via `.gitignore`
-- Secrets are only available to trusted workflows (not pull requests from forks)
-- Keep your keystore and passwords secure - losing them means you cannot update your app on the Play Store
+- The CI keystore is intentionally committed to the repository for CI convenience
+- It uses password protection as an additional security layer
+- This is appropriate for debug/development builds but not for production releases
+- Keep your production keystore separate and secure
