@@ -73,6 +73,8 @@ jobs:
 
       - name: Build debug APK
         working-directory: ./android
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: ./gradlew assembleDebug --stacktrace
 
       - name: Build release APK
@@ -104,44 +106,11 @@ jobs:
         shell: bash
         run: ./.github/scripts/rename-apks.sh release ${{ steps.version-info.outputs.version }} ${{ steps.git-info.outputs.sha_short }}
 
-      - name: Upload debug arm64-v8a APK
+      - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
-          name: kqt-debug-arm64-v8a-${{ steps.version-info.outputs.version }}-${{ steps.git-info.outputs.sha_short }}
-          path: android/app/build/outputs/apk/debug/kqt-debug-arm64-v8a-${{ steps.version-info.outputs.version }}-${{ steps.git-info.outputs.sha_short }}.apk
-          if-no-files-found: error
-
-      - name: Upload debug armeabi-v7a APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: kqt-debug-armeabi-v7a-${{ steps.version-info.outputs.version }}-${{ steps.git-info.outputs.sha_short }}
-          path: android/app/build/outputs/apk/debug/kqt-debug-armeabi-v7a-${{ steps.version-info.outputs.version }}-${{ steps.git-info.outputs.sha_short }}.apk
-          if-no-files-found: error
-
-      - name: Upload debug universal APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: kqt-debug-universal-${{ steps.version-info.outputs.version }}-${{ steps.git-info.outputs.sha_short }}
-          path: android/app/build/outputs/apk/debug/kqt-debug-universal-${{ steps.version-info.outputs.version }}-${{ steps.git-info.outputs.sha_short }}.apk
-          if-no-files-found: error
-
-      - name: Upload release arm64-v8a APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: kqt-release-arm64-v8a-${{ steps.version-info.outputs.version }}-${{ steps.git-info.outputs.sha_short }}
-          path: android/app/build/outputs/apk/release/kqt-release-arm64-v8a-${{ steps.version-info.outputs.version }}-${{ steps.git-info.outputs.sha_short }}.apk
-          if-no-files-found: error
-
-      - name: Upload release armeabi-v7a APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: kqt-release-armeabi-v7a-${{ steps.version-info.outputs.version }}-${{ steps.git-info.outputs.sha_short }}
-          path: android/app/build/outputs/apk/release/kqt-release-armeabi-v7a-${{ steps.version-info.outputs.version }}-${{ steps.git-info.outputs.sha_short }}.apk
-          if-no-files-found: error
-
-      - name: Upload release universal APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: kqt-release-universal-${{ steps.version-info.outputs.version }}-${{ steps.git-info.outputs.sha_short }}
-          path: android/app/build/outputs/apk/release/kqt-release-universal-${{ steps.version-info.outputs.version }}-${{ steps.git-info.outputs.sha_short }}.apk
+          name: kqt-apks-${{ steps.version-info.outputs.version }}-${{ steps.git-info.outputs.sha_short }}
+          path: |
+            android/app/build/outputs/apk/debug/kqt-*.apk
+            android/app/build/outputs/apk/release/kqt-*.apk
           if-no-files-found: error
