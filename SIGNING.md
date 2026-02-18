@@ -39,7 +39,7 @@ To enable APK signing in GitHub Actions, you need to configure the following sec
 
 - **All branches**: APKs are built and signed using the CI keystore
 - The keystore password is provided via the `KEYSTORE_PASSWORD` secret
-- If the secret is not configured, builds may fail or produce unsigned APKs
+- If the secret is not configured, the build will fail with an error message
 
 ## Creating a New CI Keystore
 
