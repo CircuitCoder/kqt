@@ -1,11 +1,13 @@
 package plus.meow.kqt
 
+import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -19,7 +21,6 @@ import plus.meow.kqt.storage.VpnConfigDatabase
 import plus.meow.kqt.storage.VpnConfigEntity
 import plus.meow.kqt.utils.Result
 import plus.meow.kqt.vpn.VpnStateManager
-import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
 class MainActivity : AppCompatActivity() {
@@ -33,6 +34,29 @@ class MainActivity : AppCompatActivity() {
     private lateinit var vpnStateManager: VpnStateManager
     private var loadEpoch: Int = 0
 
+    // Track pending VPN connection that requires permission
+    private var pendingVpnConnection: VpnConfigEntity? = null
+
+    // VPN permission launcher
+    private val vpnPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            // Permission granted, retry connection
+            pendingVpnConnection?.let { vpn ->
+                toggleVpn(vpn, true)
+            }
+        } else {
+            // Permission denied
+            android.widget.Toast.makeText(
+                this,
+                "VPN permission denied",
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
+        }
+        pendingVpnConnection = null
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -44,6 +68,11 @@ class MainActivity : AppCompatActivity() {
         cryptoManager = CryptoManager(this, provisioningManager)
         repository = VpnConfigRepository(database.vpnConfigDao())
         vpnStateManager = VpnStateManager(this, cryptoManager)
+
+        // Set up VPN permission callback
+        vpnStateManager.onPermissionRequired = { intent ->
+            vpnPermissionLauncher.launch(intent)
+        }
 
         // Check if key is provisioned, if not, launch provisioning activity
         if (!provisioningManager.isProvisioned()) {
@@ -169,18 +198,24 @@ class MainActivity : AppCompatActivity() {
     private fun toggleVpn(vpn: VpnConfigEntity, enabled: Boolean) {
         lifecycleScope.launch {
             val coro = if (enabled) {
-                vpnStateManager.connect(vpn, this@MainActivity)
+                // Store pending connection in case permission is needed
+                pendingVpnConnection = vpn
+                vpnStateManager.connect(vpn)
             } else {
                 vpnStateManager.disconnect(vpn.id)
             }
 
             coro.unwrapOrElse {
-                android.widget.Toast.makeText(
-                    this@MainActivity,
-                    "Failed to ${if (enabled) "connect" else "disconnect"}: $it",
-                    android.widget.Toast.LENGTH_SHORT
-                ).show()
-
+                // Only clear pending connection if it's not a permission error
+                // (permission error will be handled by the launcher callback)
+                if (it !is plus.meow.kqt.vpn.VpnStateError.PermissionRequired) {
+                    pendingVpnConnection = null
+                    android.widget.Toast.makeText(
+                        this@MainActivity,
+                        "Failed to ${if (enabled) "connect" else "disconnect"}: $it",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
             }
         }
     }

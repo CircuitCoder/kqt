@@ -5,4 +5,5 @@ members = [
   "kqt-lib",
   "kqt-kotlin",
   "kqt-tester",
+  "tun-rs",
 ]

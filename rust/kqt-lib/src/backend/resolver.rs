@@ -8,7 +8,7 @@ use crate::{
         MACAddr, NodeID, SendError, SeqNo,
         announcer::{ANNOUNCE_INTERVAL, deserialize_announcement},
     },
-    config::Mode,
+    config::{Config, Mode, Route},
     packet::ip_is_v4,
 };
 
@@ -81,10 +81,36 @@ struct L3ResolverEntry {
 
 pub struct L3ResolverImpl {
     mappings: BTreeMap<L3ResolverKey, L3ResolverEntry>,
+    locals: Vec<IpInet>, // Local IP subnets
+    statics: Vec<Route>, // Static routes
 }
 
 impl L3ResolverImpl {
-    fn lookup(&self, t: &IpAddr) -> Option<&L3ResolverEntry> {
+    fn lookup(&self, ip: &IpAddr) -> Option<&L3ResolverEntry> {
+        // First, check if t is in local subnets. If so, use it as the routing key
+        //   else, check static routes
+
+        let local = self.locals.iter().any(|r| r.contains(ip));
+        let t = if local {
+            *ip
+        } else {
+            let found = self
+                .statics
+                .iter()
+                .filter_map(|r| {
+                    if !r.to.contains(ip) {
+                        return None;
+                    }
+
+                    Some((
+                        (r.to.network_length(), -(r.metric.unwrap_or(0) as i64)),
+                        r.via,
+                    ))
+                })
+                .max_by_key(|(k, _)| *k);
+            found.map(|(_, via)| via).unwrap_or(*ip)
+        };
+
         let minimal: IpInet = if t.is_ipv4() {
             MINIMAL_IPV4_INET.into()
         } else {
@@ -118,7 +144,7 @@ impl L3ResolverImpl {
                 }
             }
 
-            if r.range.contains(t) {
+            if r.range.contains(&t) {
                 lookup = Some(l);
                 found_length = r.range.network_length();
                 found_metric = l.metric;
@@ -185,13 +211,15 @@ pub enum ResolveResult {
 }
 
 impl Resolver {
-    pub fn new(mode: Mode) -> Self {
-        match mode {
+    pub fn new(cfg: &Config) -> Self {
+        match cfg.mode {
             Mode::L2 => Resolver::L2(Arc::new(RwLock::new(L2ResolverImpl {
                 mappings: BTreeMap::new(),
             }))),
             Mode::L3 => Resolver::L3(Arc::new(RwLock::new(L3ResolverImpl {
                 mappings: BTreeMap::new(),
+                locals: cfg.address.clone(),
+                statics: cfg.route.clone(),
             }))),
         }
     }

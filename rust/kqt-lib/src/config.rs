@@ -30,9 +30,17 @@ pub struct Config {
     #[serde(default)]
     pub connect_to: Vec<ConnectTo>,
 
+    /// DNS servers
+    #[serde(default)]
+    pub dns: Vec<IpAddr>,
+
+    /// Whether to add routes to the system routing table
+    #[serde(default)]
+    pub table: bool,
+
     /// Automatically add routes
     #[serde(default)]
-    pub routes: Vec<Route>,
+    pub route: Vec<Route>,
 
     /// Advanced settings
     #[serde(default)]
