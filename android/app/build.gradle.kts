@@ -5,6 +5,8 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+val appVersionName = "1.0.0"
+
 android {
     namespace = "plus.meow.kqt"
     compileSdk = 36
@@ -14,7 +16,7 @@ android {
         minSdk = 24
         targetSdk = 36
         versionCode = 1
-        versionName = "1.0"
+        versionName = appVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
@@ -84,26 +86,12 @@ tasks.register<Copy>("collectAndRenameApks") {
 
     // Flattening and Renaming Logic
     eachFile {
-        // 'this' is a FileCopyDetails object
-        // The 'path' property includes the relative path, e.g., "release/app-x86-release.apk"
-        // The 'name' property is just the filename, e.g., "app-x86-release.apk"
-
-        // Regex to parse the standard Gradle output name: "app-[abi]-[buildType].apk"
-        // Pattern matches: "app-" followed by (ABI) followed by "-" followed by (BuildType)
         val matcher = "(.*)-(.*)-(.*)\\.apk".toRegex().matchEntire(name)
-        val android = project.extensions.getByType(com.android.build.gradle.BaseExtension::class.java)
-        val appVersionName = android.defaultConfig.versionName
-        val appName = "kqt"
 
         if (matcher != null) {
             val (prefix, abi, buildType) = matcher.destructured
-
-            // Construct your custom name: some-name-[abi]-[version]-[buildType].apk
-            // We ignore the original prefix ("app") and use your 'appName' variable
-            path = "$appName-$abi-$appVersionName-$buildType.apk"
+            path = "kqt-$abi-$appVersionName-$buildType.apk"
         } else {
-            // Fallback for files that don't match the split pattern (like universal if named differently)
-            // Tries to insert the version name before the .apk extension
             path = name.replace(".apk", "-$appVersionName.apk")
         }
     }
