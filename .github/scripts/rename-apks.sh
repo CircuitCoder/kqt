@@ -33,6 +33,8 @@ for apk in *.apk; do
         mv "$apk" "kqt-$BUILD_TYPE-armeabi-v7a-$VERSION-$COMMIT.apk"
     elif [[ "$apk" == *"universal"* ]]; then
         mv "$apk" "kqt-$BUILD_TYPE-universal-$VERSION-$COMMIT.apk"
+    else
+        echo "Warning: Unexpected APK file does not match known patterns: $apk"
     fi
 done
 
