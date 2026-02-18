@@ -88,13 +88,17 @@ jobs:
         shell: bash
         run: |
           # Extract version from the universal debug APK using aapt
-          APK_PATH="android/app/build/outputs/apk/debug/app-universal-debug.apk"
+          # Use wildcard to match the actual APK name (e.g., app-universal-debug.apk)
+          APK_PATH=$(ls android/app/build/outputs/apk/debug/*universal*.apk 2>/dev/null | head -1)
           
-          if [ ! -f "$APK_PATH" ]; then
-            echo "Error: Universal debug APK not found at $APK_PATH"
+          if [ -z "$APK_PATH" ] || [ ! -f "$APK_PATH" ]; then
+            echo "Error: Universal debug APK not found"
+            echo "Looking in: android/app/build/outputs/apk/debug/"
             ls -la android/app/build/outputs/apk/debug/ || echo "Debug directory does not exist"
             exit 1
           fi
+          
+          echo "Using APK: $APK_PATH"
           
           # Use aapt to extract version name from APK
           VERSION=$(aapt dump badging "$APK_PATH" | grep "versionName" | sed -E "s/.*versionName='([^']+)'.*/\1/")
