@@ -15,6 +15,9 @@ fi
 
 cd "android/app/build/outputs/apk/$BUILD_TYPE"
 
+# Enable nullglob to handle case where no APK files exist
+shopt -s nullglob
+
 for apk in *.apk; do
     if [[ "$apk" == *"arm64-v8a"* ]]; then
         mv "$apk" "kqt-$BUILD_TYPE-arm64-v8a-$VERSION-$COMMIT.apk"

@@ -86,7 +86,7 @@ jobs:
         working-directory: ./android
         shell: bash
         run: |
-          VERSION=$(./gradlew -q properties --property versionName | grep "^versionName:" | awk '{print $2}')
+          VERSION=$(./gradlew -q properties | grep "^versionName:" | awk '{print $2}')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Rename debug APKs
