@@ -75,22 +75,64 @@ jobs:
 
       - name: Build debug APK
         working-directory: ./android
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: ./gradlew assembleDebug --stacktrace
 
       - name: Build release APK
         working-directory: ./android
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: ./gradlew assembleRelease --stacktrace
 
-      - name: Upload debug APKs
-        uses: actions/upload-artifact@v4
-        with:
-          name: kqt-android-debug-${{ steps.git-info.outputs.sha_short }}
-          path: android/app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
+      - name: Collect and rename APKs
+        working-directory: ./android
+        run: ./gradlew collectAndRenameApks --stacktrace
 
-      - name: Upload release APKs
+      - name: Check if signed
+        id: signing-status
+        shell: bash
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_PASSWORD" ]; then
+            echo "signed=true" >> $GITHUB_OUTPUT
+          else
+            echo "signed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Collect and rename APKs
+        shell: bash
+        run: |
+          # Create collection directory
+          mkdir -p upload
+          
+          COMMIT_HASH="${{ steps.git-info.outputs.sha_short }}"
+          SIGNED="${{ steps.signing-status.outputs.signed }}"
+          
+          # Determine suffix based on signing status
+          SUFFIX=""
+          if [ "$SIGNED" != "true" ]; then
+            SUFFIX="-UNSIGNED"
+          fi
+          
+          # Collect APKs
+          for apk in android/app/build/outputs/collected/kqt-*.apk; do
+            if [ -f "$apk" ]; then
+              filename=$(basename "$apk")
+              # Insert commit hash before .apk extension
+              new_name="${filename%.apk}-${COMMIT_HASH}${SUFFIX}.apk"
+              cp "$apk" "upload/$new_name"
+              echo "Collected: $new_name"
+            fi
+          done
+          
+          echo "All collected APKs:"
+          ls -1 upload/
+
+      - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
-          name: kqt-android-release-${{ steps.git-info.outputs.sha_short }}
-          path: android/app/build/outputs/apk/release/*.apk
+          name: kqt-apks-${{ steps.git-info.outputs.sha_short }}
+          path: upload/*.apk
           if-no-files-found: error
