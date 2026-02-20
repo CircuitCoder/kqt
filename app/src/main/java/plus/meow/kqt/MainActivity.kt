@@ -21,6 +21,7 @@ import plus.meow.kqt.storage.VpnConfigDatabase
 import plus.meow.kqt.storage.VpnConfigEntity
 import plus.meow.kqt.utils.Result
 import plus.meow.kqt.vpn.VpnStateManager
+import kotlin.uuid.Uuid
 
 class MainActivity : AppCompatActivity() {
     private val vpns = mutableListOf<VpnConfigEntity>()
@@ -34,7 +35,7 @@ class MainActivity : AppCompatActivity() {
     private var loadEpoch: Int = 0
 
     // Track pending VPN connection that requires permission
-    private var pendingVpnConnection: VpnConfigEntity? = null
+    private var pendingVpnConnection: Uuid? = null
 
     // VPN permission launcher
     private val vpnPermissionLauncher = registerForActivityResult(
@@ -42,8 +43,8 @@ class MainActivity : AppCompatActivity() {
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             // Permission granted, retry connection
-            pendingVpnConnection?.let { vpn ->
-                toggleVpn(vpn, true)
+            pendingVpnConnection?.let { id ->
+                toggleVpn(id, true)
             }
         } else {
             // Permission denied
@@ -194,14 +195,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun toggleVpn(vpn: VpnConfigEntity, enabled: Boolean) {
+    private fun toggleVpn(vpnId: Uuid, enabled: Boolean) {
         lifecycleScope.launch {
             val coro = if (enabled) {
                 // Store pending connection in case permission is needed
-                pendingVpnConnection = vpn
-                vpnStateManager.connect(vpn)
+                pendingVpnConnection = vpnId
+                val config = repository.get(vpnId) ?: return@launch;
+                vpnStateManager.connect(config)
             } else {
-                vpnStateManager.disconnect(vpn.id)
+                vpnStateManager.disconnect(vpnId)
             }
 
             coro.unwrapOrElse {
@@ -220,13 +222,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showEditSheet(entry: VpnConfigEntity) {
+        val entryId = entry.id
         val sheet = EditVpnBottomSheet.newInstance(
-            entityId = entry.id,
+            entityInit = entry,
             repository = repository,
             cryptoManager = cryptoManager,
             vpnStateManager = vpnStateManager,
             onChanged = ::loadVpnList,
-            onToggle = { this.toggleVpn(entry, it) }
+            onToggle = { this.toggleVpn(entryId, it) }
         )
         sheet.show(supportFragmentManager, "edit_vpn")
     }

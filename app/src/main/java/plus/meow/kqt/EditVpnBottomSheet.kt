@@ -64,10 +64,10 @@ private data class ButtonVisualState(
     val icon: Int
 )
 
-class EditVpnBottomSheet : BottomSheetDialogFragment() {
+class EditVpnBottomSheet(entityInit: VpnConfigEntity) : BottomSheetDialogFragment() {
 
-    private lateinit var entityId: kotlin.uuid.Uuid
-    private lateinit var entryFlow: MutableStateFlow<VpnConfigEntity>
+    private var entityId: kotlin.uuid.Uuid = entityInit.id
+    private var entryFlow: MutableStateFlow<VpnConfigEntity> = MutableStateFlow(entityInit)
     private var onChanged: (() -> Unit)? = null
     private var onToggle: ((Boolean) -> Unit)? = null
     private lateinit var repository: VpnConfigRepository
@@ -158,9 +158,9 @@ class EditVpnBottomSheet : BottomSheetDialogFragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        // Load entity from repository and initialize entryFlow
+        // Refresh entity from repository and initialize entryFlow
         lifecycleScope.launch {
-            val entity = repository.listAll().find { it.id == entityId }
+            val entity = repository.get(entityId)
             if (entity == null) {
                 // Entity not found, dismiss the sheet
                 Toast.makeText(requireContext(), "VPN configuration not found", Toast.LENGTH_SHORT).show()
@@ -169,7 +169,7 @@ class EditVpnBottomSheet : BottomSheetDialogFragment() {
             }
 
             // Initialize entryFlow
-            entryFlow = MutableStateFlow(entity)
+            entryFlow.value = entity
 
             // Now initialize the rest of the UI
             initializeViews(view)
@@ -547,7 +547,7 @@ class EditVpnBottomSheet : BottomSheetDialogFragment() {
             }
 
             // Reload entry from repository to get fresh data
-            val reloadedEntry = repository.listAll().find { it.id == entityId }
+            val reloadedEntry = repository.get(entityId)
             if (reloadedEntry != null) {
                 entryFlow.value = reloadedEntry
             }
@@ -756,15 +756,14 @@ class EditVpnBottomSheet : BottomSheetDialogFragment() {
 
     companion object {
         fun newInstance(
-            entityId: kotlin.uuid.Uuid,
+            entityInit: VpnConfigEntity,
             repository: VpnConfigRepository,
             cryptoManager: CryptoManager,
             vpnStateManager: VpnStateManager,
             onChanged: () -> Unit,
             onToggle: (Boolean) -> Unit
         ): EditVpnBottomSheet {
-            return EditVpnBottomSheet().apply {
-                this.entityId = entityId
+            return EditVpnBottomSheet(entityInit).apply {
                 this.repository = repository
                 this.cryptoManager = cryptoManager
                 this.vpnStateManager = vpnStateManager

@@ -218,9 +218,13 @@ class CryptoManager(
 
     suspend fun <T> retryCrypto(c: (SecretKey) -> Cipher, op: (SecretKey, Cipher) -> T): Result<T, CryptoError> {
         val k = getMasterKey() ?: return Result.err(CryptoError.NoMasterKey)
-        var cipher = c(k);
+
+        var cipher: Cipher? = null;
         while (true) {
             try {
+                // For a time-based one, fails at cipher creation, authenticate with nothing
+                if (cipher == null) cipher = c(k);
+                // For an each-use one, fails at usage, authenticate with cipher
                 val result = op.invoke(k, cipher)
                 return Result.Ok(result)
             } catch (e: Exception) {
@@ -231,13 +235,13 @@ class CryptoManager(
                 val doBiometric = isUserNotAuthenticated(e) or doesKeyRequireAuth(k)
 
                 if (doBiometric) {
-                    // Recreate cipher
-                    cipher = c(k);
+                    // Recreate cipher if the cipher creation is not the problem
+                    if (cipher != null) cipher = c(k);
 
                     if (biometricAuthManager.authenticate(
                             title = "Authenticate",
                             subtitle = "Access encrypted VPN configurations",
-                            co = BiometricPrompt.CryptoObject(cipher),
+                            co = if (cipher != null) BiometricPrompt.CryptoObject(cipher) else null,
                         )
                     ) {
                         continue;

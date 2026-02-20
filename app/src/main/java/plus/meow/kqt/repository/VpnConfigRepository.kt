@@ -25,6 +25,12 @@ class VpnConfigRepository(
         override fun toString() = "Database error: $message"
     }
 
+    /**
+     * Get specific VPN configuration
+     */
+    suspend fun get(id: Uuid) = withContext(Dispatchers.IO) {
+        dao.getById(id)
+    }
 
     /**
      * List all VPN configurations (full entities).
