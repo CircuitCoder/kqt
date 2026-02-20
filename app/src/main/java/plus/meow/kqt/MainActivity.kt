@@ -21,7 +21,6 @@ import plus.meow.kqt.storage.VpnConfigDatabase
 import plus.meow.kqt.storage.VpnConfigEntity
 import plus.meow.kqt.utils.Result
 import plus.meow.kqt.vpn.VpnStateManager
-import kotlin.uuid.Uuid
 
 class MainActivity : AppCompatActivity() {
     private val vpns = mutableListOf<VpnConfigEntity>()
@@ -220,23 +219,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun validateVpnName(excludeId: Uuid, name: String): String? {
-        return when {
-            name != name.trim() -> getString(R.string.vpn_name_empty) // Untrimmed
-            name.isEmpty() -> getString(R.string.vpn_name_empty)
-            name.length > 50 -> getString(R.string.vpn_name_too_long)
-            vpns.any { it.id != excludeId && it.name == name } -> getString(R.string.vpn_name_conflict)
-            else -> null
-        }
-    }
-
     private fun showEditSheet(entry: VpnConfigEntity) {
         val sheet = EditVpnBottomSheet.newInstance(
-            entity = entry,
+            entityId = entry.id,
             repository = repository,
             cryptoManager = cryptoManager,
             vpnStateManager = vpnStateManager,
-            nameValidator = { this.validateVpnName(entry.id, it) },
             onChanged = ::loadVpnList,
             onToggle = { this.toggleVpn(entry, it) }
         )
