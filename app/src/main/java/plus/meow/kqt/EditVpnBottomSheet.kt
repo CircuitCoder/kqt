@@ -158,6 +158,12 @@ class EditVpnBottomSheet(entityInit: VpnConfigEntity) : BottomSheetDialogFragmen
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
+        initializeViews(view)
+        setupListeners()
+        setupButtonStateObservation()
+
+        entryFlow.onEach(::loadEntry).launchIn(lifecycleScope)
+
         // Refresh entity from repository and initialize entryFlow
         lifecycleScope.launch {
             val entity = repository.get(entityId)
@@ -170,12 +176,6 @@ class EditVpnBottomSheet(entityInit: VpnConfigEntity) : BottomSheetDialogFragmen
 
             // Initialize entryFlow
             entryFlow.value = entity
-
-            // Now initialize the rest of the UI
-            initializeViews(view)
-            setupListeners()
-            setupButtonStateObservation()
-            loadEntry()
         }
     }
 
@@ -410,9 +410,7 @@ class EditVpnBottomSheet(entityInit: VpnConfigEntity) : BottomSheetDialogFragmen
         }
     }
 
-    private fun loadEntry() {
-        val entry = entryFlow.value
-
+    private fun loadEntry(entry: VpnConfigEntity) {
         // Initialize UI from entity data
         draftNameFlow.value = entry.name
         nameInput.setText(entry.name)
