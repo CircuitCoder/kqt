@@ -52,7 +52,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/toggleIconButton"
-                style="@style/Widget.Material3.Button.IconButton"
+                style="@style/Widget.Material3.Button.ElevatedButton.Icon"
                 android:layout_width="@dimen/vpn_field_height"
                 android:layout_height="@dimen/vpn_field_height"
                 android:layout_gravity="bottom"
