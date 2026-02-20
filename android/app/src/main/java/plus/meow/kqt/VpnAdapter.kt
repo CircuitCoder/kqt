@@ -14,12 +14,13 @@ import kotlinx.coroutines.flow.onEach
 import plus.meow.kqt.storage.VpnConfigEntity
 import plus.meow.kqt.vpn.VpnState
 import plus.meow.kqt.vpn.VpnStateManager
+import kotlin.uuid.Uuid
 
 class VpnAdapter(
     private val lifecycleOwner: LifecycleOwner,
     private val vpnStateManager: VpnStateManager,
     private val onEdit: (VpnConfigEntity) -> Unit,
-    private val onToggle: (VpnConfigEntity, Boolean) -> Unit,
+    private val onToggle: (Uuid, Boolean) -> Unit,
 ) : ListAdapter<VpnConfigEntity, VpnAdapter.VpnViewHolder>(VpnDiffCallback()) {
 
     init {
@@ -46,7 +47,7 @@ class VpnAdapter(
         private val lifecycleOwner: LifecycleOwner,
         private val vpnStateManager: VpnStateManager,
         private val onEdit: (VpnConfigEntity) -> Unit,
-        private val onToggle: (VpnConfigEntity, Boolean) -> Unit,
+        private val onToggle: (Uuid, Boolean) -> Unit,
     ) : RecyclerView.ViewHolder(itemView) {
         private val nameText = itemView.findViewById<TextView>(R.id.vpnName)
         private val toggle = itemView.findViewById<MaterialSwitch>(R.id.vpnToggle)
@@ -72,7 +73,7 @@ class VpnAdapter(
                 val isChecked = toggle.isChecked
                 toggle.isChecked = !isChecked
                 if (entry!!.encryptedConfig != null) {
-                    onToggle(entry, isChecked)
+                    onToggle(entry.id, isChecked)
                 }
             }
 

@@ -1,7 +1,10 @@
 package plus.meow.kqt
 
+import android.animation.ArgbEvaluator
+import android.animation.ValueAnimator
 import android.app.Activity
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.graphics.Typeface
 import android.net.Uri
 import android.os.Bundle
@@ -14,6 +17,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.widget.TooltipCompat
+import androidx.core.graphics.ColorUtils
 import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.bottomsheet.BottomSheetBehavior
@@ -23,7 +27,12 @@ import com.google.android.material.button.MaterialButton
 import com.google.android.material.textfield.TextInputEditText
 import io.github.rosemoe.sora.widget.CodeEditor
 import io.github.rosemoe.sora.widget.schemes.EditorColorScheme.WHOLE_BACKGROUND
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import plus.meow.kqt.crypto.CryptoManager
@@ -33,31 +42,61 @@ import plus.meow.kqt.storage.VpnConfigEntity
 import plus.meow.kqt.utils.Result
 import plus.meow.kqt.vpn.VpnState
 import plus.meow.kqt.vpn.VpnStateManager
+import kotlin.math.absoluteValue
 
-class EditVpnBottomSheet : BottomSheetDialogFragment() {
+/**
+ * Represents the state of the toggle button combining VPN running state and pending changes
+ */
+private enum class ButtonState {
+    IDLE,           // VPN off, no pending changes
+    RUNNING,        // VPN on, no pending changes
+    PENDING_SAVE    // Has pending changes (VPN can be on or off)
+}
 
-    private lateinit var entry: VpnConfigEntity
+/**
+ * Complete visual state for the button including colors, icon, and enabled state
+ */
+private data class ButtonVisualState(
+    val state: ButtonState,
+    val enabled: Boolean,
+    val bg: Int,
+    val fg: Int,
+    val icon: Int
+)
+
+class EditVpnBottomSheet(entityInit: VpnConfigEntity) : BottomSheetDialogFragment() {
+
+    private var entityId: kotlin.uuid.Uuid = entityInit.id
+    private var entryFlow: MutableStateFlow<VpnConfigEntity> = MutableStateFlow(entityInit)
     private var onChanged: (() -> Unit)? = null
     private var onToggle: ((Boolean) -> Unit)? = null
-    private var nameValidator: ((String) -> String?)? = null
     private lateinit var repository: VpnConfigRepository
     private lateinit var cryptoManager: CryptoManager
     private lateinit var vpnStateManager: VpnStateManager
 
     private lateinit var nameInput: TextInputEditText
     private lateinit var toggleButton: MaterialButton
-    private lateinit var saveButton: MaterialButton
     private lateinit var codeEditor: CodeEditor
     private lateinit var codeEditorWrapper: ViewGroup
     private lateinit var decryptPlaceholder: LinearLayout
     private lateinit var addConfigPlaceholder: LinearLayout
     private lateinit var exportButton: MaterialButton
 
-    private var draftName: String = ""
-
     // State for configuration editing
     private var decryptedConfiguration: String? = null
-    private var isConfigEdited: Boolean = false
+
+    // State flows - source of truth
+    private val draftNameFlow = MutableStateFlow("")
+    private val isConfigEditedFlow = MutableStateFlow(false)
+
+    // Derived validation error flow
+    private lateinit var validationErrorFlow: kotlinx.coroutines.flow.Flow<String?>
+
+    // Derived button visual state flow - single source of truth for button appearance
+    private lateinit var buttonVisualStateFlow: kotlinx.coroutines.flow.Flow<ButtonVisualState>
+
+    // Current button state animator
+    private var currentAnimator: ValueAnimator? = null
 
     // Activity result launchers for export and import
     private val exportLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -84,19 +123,65 @@ class EditVpnBottomSheet : BottomSheetDialogFragment() {
         return inflater.inflate(R.layout.sheet_edit_vpn, container, false)
     }
 
+    override fun onStart() {
+        super.onStart()
+
+        // Configure bottom sheet behavior after view is attached
+        val dialog = dialog as? BottomSheetDialog
+        val bottomSheet = dialog?.findViewById<View>(
+            com.google.android.material.R.id.design_bottom_sheet
+        )
+
+        if (bottomSheet != null) {
+            val screenHeight = getScreenHeight()
+            val peekHeight = resources.getDimensionPixelSize(R.dimen.bottom_sheet_peek_height)
+
+            // Force bottom sheet to full screen height
+            val layoutParams = bottomSheet.layoutParams
+            layoutParams.height = screenHeight
+            bottomSheet.layoutParams = layoutParams
+
+            val behavior = BottomSheetBehavior.from(bottomSheet)
+            behavior.isFitToContents = false
+            behavior.skipCollapsed = false
+            behavior.peekHeight = peekHeight
+            behavior.expandedOffset = 0
+            behavior.maxHeight = screenHeight
+
+            // Important: Allow the behavior to settle before setting state
+            bottomSheet.post {
+                behavior.state = BottomSheetBehavior.STATE_COLLAPSED
+            }
+        }
+    }
+
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
         initializeViews(view)
         setupListeners()
-        configureBottomSheet(view)
-        loadEntry()
+        setupButtonStateObservation()
+
+        entryFlow.onEach(::loadEntry).launchIn(lifecycleScope)
+
+        // Refresh entity from repository and initialize entryFlow
+        lifecycleScope.launch {
+            val entity = repository.get(entityId)
+            if (entity == null) {
+                // Entity not found, dismiss the sheet
+                Toast.makeText(requireContext(), "VPN configuration not found", Toast.LENGTH_SHORT).show()
+                dismiss()
+                return@launch
+            }
+
+            // Initialize entryFlow
+            entryFlow.value = entity
+        }
     }
 
     private fun initializeViews(view: View) {
         nameInput = view.findViewById(R.id.nameInput)
         toggleButton = view.findViewById(R.id.toggleIconButton)
-        saveButton = view.findViewById(R.id.saveButton)
         codeEditor = view.findViewById(R.id.codeEditor)
         codeEditorWrapper = view.findViewById(R.id.codeEditorWrapper)
         decryptPlaceholder = view.findViewById(R.id.decryptPlaceholder)
@@ -116,8 +201,7 @@ class EditVpnBottomSheet : BottomSheetDialogFragment() {
                 return@subscribeEvent
             }
             decryptedConfiguration = codeEditor.text.toString()
-            isConfigEdited = true
-            updateSaveEnabled()
+            isConfigEditedFlow.value = true
         }
 
         // Prevent bottom sheet drag when touching the editor
@@ -144,6 +228,9 @@ class EditVpnBottomSheet : BottomSheetDialogFragment() {
         deleteButton.setOnClickListener {
             handleDelete()
         }
+
+        // Setup button state observation
+        setupButtonStateObservation()
     }
 
     private fun configureCodeEditor() {
@@ -212,18 +299,124 @@ class EditVpnBottomSheet : BottomSheetDialogFragment() {
         }
     }
 
-    private fun loadEntry() {
-        // Initialize UI from entity data
-        draftName = entry.name
-        nameInput.setText(draftName)
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun setupButtonStateObservation() {
+        // Create validation error flow
+        validationErrorFlow = draftNameFlow.mapLatest { name ->
+            validateVpnName(name)
+        }
 
-        // Observe VPN state for this entry
-        vpnStateManager.observe(entry.id)
-            .onEach { state ->
-                val isRunning = state !is VpnState.Disconnected
-                toggleButton.isChecked = isRunning
+        // Observe validation error and update UI
+        validationErrorFlow.onEach { error ->
+            nameInput.error = error
+        }.launchIn(lifecycleScope)
+
+        // Create comprehensive button visual state flow - single source of truth
+        buttonVisualStateFlow = combine(
+            vpnStateManager.observe(entityId),
+            entryFlow,
+            draftNameFlow,
+            validationErrorFlow,
+            isConfigEditedFlow
+        ) { vpnState, entry, draftName, validationError, isConfigEdited ->
+            val isRunning = vpnState !is VpnState.Disconnected
+            val trimmedName = draftName.trim()
+            val nameChanged = trimmedName != entry.name
+            val hasPendingChanges = nameChanged || isConfigEdited
+            val hasConfig = entry.encryptedConfig != null || decryptedConfiguration != null
+
+            // Determine button state
+            val buttonState = when {
+                hasPendingChanges -> ButtonState.PENDING_SAVE
+                isRunning -> ButtonState.RUNNING
+                else -> ButtonState.IDLE
             }
-            .launchIn(lifecycleScope)
+
+            // Determine enabled state
+            val enabled = when (buttonState) {
+                ButtonState.PENDING_SAVE -> validationError == null // Only enable save if validation passes
+                else -> validationError == null && hasConfig
+            }
+
+            // Get theme colors
+            val context = requireContext()
+            val typedValue = android.util.TypedValue()
+            val theme = context.theme
+
+            fun resolveColor(attr: Int): Int {
+                theme.resolveAttribute(attr, typedValue, true)
+                return typedValue.data
+            }
+
+            val icon = when (buttonState) {
+                ButtonState.IDLE -> R.drawable.ic_play
+                ButtonState.RUNNING -> R.drawable.ic_stop
+                ButtonState.PENDING_SAVE -> R.drawable.ic_save
+            }
+
+            // Determine colors and icon based on state and enabled status
+            val (bg, fg) = if (!enabled) {
+                // Disabled state: grey background
+                Pair(
+                    resolveColor(com.google.android.material.R.attr.colorSurfaceVariant),
+                    resolveColor(com.google.android.material.R.attr.colorOnSurfaceVariant),
+                )
+            } else {
+                // Enabled state: state-specific colors
+                when (buttonState) {
+                    ButtonState.IDLE -> Pair(
+                        resolveColor(android.R.attr.colorPrimary),
+                        resolveColor(com.google.android.material.R.attr.colorOnPrimary),
+                    )
+                    ButtonState.RUNNING -> Pair(
+                        resolveColor(android.R.attr.colorPrimary),
+                        resolveColor(com.google.android.material.R.attr.colorOnPrimary),
+                    )
+                    ButtonState.PENDING_SAVE -> Pair(
+                        context.getColor(android.R.color.holo_green_dark),
+                        context.getColor(android.R.color.white),
+                    )
+                }
+            }
+
+            ButtonVisualState(buttonState, enabled, bg, fg, icon)
+        }
+
+        // Observe the button visual state and animate transitions
+        buttonVisualStateFlow.onEach { visualState ->
+            animateToVisualState(visualState)
+        }.launchIn(lifecycleScope)
+    }
+
+    /**
+     * Validate VPN name against business rules
+     * Returns error message if invalid, null if valid
+     */
+    private suspend fun validateVpnName(name: String): String? {
+        val context = requireContext()
+        return when {
+            name != name.trim() -> context.getString(R.string.vpn_name_empty) // Untrimmed
+            name.isEmpty() -> context.getString(R.string.vpn_name_empty)
+            name.length > 50 -> context.getString(R.string.vpn_name_too_long)
+            else -> {
+                // Check for name conflicts in repository
+                val allConfigs = repository.listAll()
+                if (allConfigs.any { it.id != entityId && it.name == name }) {
+                    context.getString(R.string.vpn_name_conflict)
+                } else {
+                    null
+                }
+            }
+        }
+    }
+
+    private fun loadEntry(entry: VpnConfigEntity) {
+        // Initialize UI from entity data
+        draftNameFlow.value = entry.name
+        nameInput.setText(entry.name)
+
+        // Initialize button icon tag for animation tracking
+        toggleButton.tag = R.drawable.ic_play
 
         // Check if config exists (based on encryptedConfig field)
         val hasConfig = entry.encryptedConfig != null
@@ -240,51 +433,99 @@ class EditVpnBottomSheet : BottomSheetDialogFragment() {
 
         // Show placeholder for config
         updateConfigDisplay()
-        updateSaveEnabled()
     }
 
     private fun setupListeners() {
         nameInput.doAfterTextChanged { text ->
-            draftName = text?.toString()?.trim().orEmpty()
-            validateName()
-            updateSaveEnabled()
+            val newName = text?.toString()?.trim().orEmpty()
+            draftNameFlow.value = newName
         }
 
         toggleButton.setOnClickListener {
-            // FIXME: warn about unsaved config
-            // FIXME: listen on database change
-            // MaterialButton automatically toggles isChecked before onClick fires
-            // So toggleButton.isChecked already contains the new state
-
-            // Immediately revert to avoid inconsistent UI state if the state is synchronously
-            // changed back
-            val isChecked = toggleButton.isChecked
-            toggleButton.isChecked = !isChecked
-            onToggle?.invoke(isChecked)
+            handleToggleButtonClick()
         }
+    }
 
-        saveButton.setOnClickListener {
-            if (saveButton.isEnabled) {
-                performSave()
+
+    private fun handleToggleButtonClick() {
+        lifecycleScope.launch {
+            // Get current button state from the flow
+            val currentVisualState = buttonVisualStateFlow.first()
+
+            when (currentVisualState.state) {
+                ButtonState.PENDING_SAVE -> {
+                    // Save mode - perform save
+                    performSave()
+                }
+                ButtonState.RUNNING, ButtonState.IDLE -> {
+                    // Toggle mode - toggle VPN state
+                    val shouldStart = currentVisualState.state == ButtonState.IDLE
+                    onToggle?.invoke(shouldStart)
+                }
             }
         }
     }
 
-    private fun validateName(): Boolean {
-        nameInput.error = nameValidator?.invoke(draftName)
-        return nameInput.error == null
+    private fun animateToVisualState(targetState: ButtonVisualState) {
+        // Cancel any existing animation
+        currentAnimator?.cancel()
+
+        // Update enabled state immediately
+        toggleButton.isEnabled = targetState.enabled
+
+        // Get current colors
+        val currentBgColor = toggleButton.backgroundTintList?.defaultColor ?: targetState.bg
+        val currentIconColor = toggleButton.iconTint?.defaultColor ?: targetState.fg
+
+        // Check if icon needs to change
+        val currentIconTag = toggleButton.tag as? Int
+        val needsIconChange = currentIconTag != null && currentIconTag != targetState.icon
+
+        // Create and start animation with icon fade if needed
+        currentAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = if (needsIconChange) 300 else 200 // Longer duration for icon change
+            addUpdateListener { animator ->
+                val fraction = animator.animatedValue as Float
+
+                // Interpolate colors
+                val bgColor = ArgbEvaluator().evaluate(fraction, currentBgColor, targetState.bg) as Int
+                val iconColor = ArgbEvaluator().evaluate(fraction, currentIconColor, targetState.fg) as Int
+                val iconAlpha = if (needsIconChange) (1f - (fraction * 2f)).absoluteValue else 1f
+                val iconDimmedColor = ColorUtils.setAlphaComponent(iconColor, (iconAlpha * 255).toInt())
+
+
+                // Apply colors
+                toggleButton.backgroundTintList = ColorStateList.valueOf(bgColor)
+                toggleButton.iconTint = ColorStateList.valueOf(iconDimmedColor)
+
+                // Handle icon fade animation
+                if (needsIconChange && fraction >= 0.5f && toggleButton.tag != targetState.icon) {
+                    toggleButton.setIconResource(targetState.icon)
+                    toggleButton.tag = targetState.icon
+                }
+            }
+            start()
+        }
+
+        // If icon doesn't need animation, update immediately
+        if (!needsIconChange) {
+            toggleButton.setIconResource(targetState.icon)
+            toggleButton.tag = targetState.icon
+        }
     }
 
     private fun performSave() {
-        val trimmedName = draftName.trim()
+        val trimmedName = draftNameFlow.value.trim()
 
         lifecycleScope.launch {
+            val currentEntry = entryFlow.value
+
             // Create updated entity based on what changed
-            val updatedEntity = if (isConfigEdited && decryptedConfiguration != null) {
+            val updatedEntity = if (isConfigEditedFlow.value && decryptedConfiguration != null) {
                 // Use the "with configuration" update pathway
                 // This requires biometric authentication
 
-                val ret = entry.withNameAndConfig(trimmedName, decryptedConfiguration!!, cryptoManager)
+                val ret = currentEntry.withNameAndConfig(trimmedName, decryptedConfiguration!!, cryptoManager)
                 when (ret) {
                     is Result.Err -> {
                         ret.toast(requireContext())
@@ -294,7 +535,7 @@ class EditVpnBottomSheet : BottomSheetDialogFragment() {
                 }
             } else {
                 // Only update the name (no authentication needed)
-                entry.copy(name = trimmedName)
+                currentEntry.copy(name = trimmedName)
             }
 
             val ret = repository.update(updatedEntity)
@@ -303,22 +544,24 @@ class EditVpnBottomSheet : BottomSheetDialogFragment() {
                 return@launch
             }
 
+            // Reload entry from repository to get fresh data
+            val reloadedEntry = repository.get(entityId)
+            if (reloadedEntry != null) {
+                entryFlow.value = reloadedEntry
+            }
+
+            // Reset edit state
+            isConfigEditedFlow.value = false
+
             // Notify parent of changes
             onChanged?.invoke()
-            dismiss()
+
+            // Don't dismiss - keep the sheet open
         }
     }
 
-    private fun updateSaveEnabled() {
-        val trimmedName = draftName.trim()
-        val hasChanged = trimmedName != entry.name
-        val isValid = validateName()
-
-        // Enable save button if name changed OR config is edited, and name is valid
-        saveButton.isEnabled = (hasChanged || isConfigEdited) && isValid
-    }
-
     private fun updateConfigDisplay() {
+        val entry = entryFlow.value
         val hasEncryptedConfig = entry.encryptedConfig != null
 
         when {
@@ -344,8 +587,14 @@ class EditVpnBottomSheet : BottomSheetDialogFragment() {
         }
     }
 
+    private fun expandFully() {
+        val sheet = dialog as? BottomSheetDialog
+        if (sheet != null) sheet.behavior.state = BottomSheetBehavior.STATE_EXPANDED
+    }
+
     private fun handleDecryptConfig() {
         lifecycleScope.launch {
+            val entry = entryFlow.value
             val config = when (val result = entry.decryptConfig(cryptoManager)) {
                 is Result.Ok -> result.value
                 is Result.Err -> {
@@ -357,6 +606,7 @@ class EditVpnBottomSheet : BottomSheetDialogFragment() {
             // Set decrypted config and update display
             decryptedConfiguration = config
             updateConfigDisplay()
+            expandFully()
         }
     }
 
@@ -370,37 +620,22 @@ class EditVpnBottomSheet : BottomSheetDialogFragment() {
             address = "LOCAL_INTERNAL_ADDR"
             
             mode = "L3"
+            
+            [[route]]
+            to = "0.0.0.0/0"
+            via = "REMOTE_INTERNAL_ADDR"
 
             [[connect_to]]
             endpoint = "REMOTE_IP"
-            designated_range = ["REMOTE_INTERNAL_ADDR/32"]
         """.trimIndent()
-        isConfigEdited = true
+        isConfigEditedFlow.value = true
         updateConfigDisplay()
-        updateSaveEnabled()
+        expandFully()
     }
 
-    private fun configureBottomSheet(view: View) {
-        (dialog as? BottomSheetDialog)?.setOnShowListener {
-            val bottomSheet = dialog?.findViewById<View>(
-                com.google.android.material.R.id.design_bottom_sheet
-            )
-            if (bottomSheet != null) {
-                val behavior = BottomSheetBehavior.from(bottomSheet)
-                val peekHeight = resources.getDimensionPixelSize(R.dimen.bottom_sheet_peek_height)
-                behavior.peekHeight = peekHeight
-                behavior.state = BottomSheetBehavior.STATE_COLLAPSED
-                behavior.isFitToContents = true
-                behavior.skipCollapsed = false
-
-                // Set minimum height to screen height
-                view.minimumHeight = getScreenHeight()
-            }
-        }
-    }
 
     private fun handleExport() {
-        val name = draftName.trim().ifEmpty { "config" }
+        val name = draftNameFlow.value.trim().ifEmpty { "config" }
 
         // Create intent to save file
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
@@ -413,6 +648,7 @@ class EditVpnBottomSheet : BottomSheetDialogFragment() {
 
     private fun exportConfigToUri(uri: Uri) {
         lifecycleScope.launch {
+            val entry = entryFlow.value
             val config = when (val result = entry.decryptConfig(cryptoManager)) {
                 is Result.Ok -> result.value
                 is Result.Err -> {
@@ -461,11 +697,10 @@ class EditVpnBottomSheet : BottomSheetDialogFragment() {
 
                 // Don't update database directly - store in decryptedConfiguration
                 decryptedConfiguration = configContent
-                isConfigEdited = true
+                isConfigEditedFlow.value = true
 
                 // Update UI
                 updateConfigDisplay()
-                updateSaveEnabled()
 
                 // Enable buttons now that config exists
                 exportButton.isEnabled = true
@@ -485,10 +720,10 @@ class EditVpnBottomSheet : BottomSheetDialogFragment() {
         // Show confirmation dialog
         AlertDialog.Builder(requireContext())
             .setTitle(R.string.delete_vpn_title)
-            .setMessage(getString(R.string.delete_vpn_message, draftName))
+            .setMessage(getString(R.string.delete_vpn_message, draftNameFlow.value))
             .setPositiveButton(R.string.delete) { _, _ ->
                 lifecycleScope.launch {
-                    when (val result = repository.delete(entry.id)) {
+                    when (val result = repository.delete(entityId)) {
                         is Result.Ok -> {
                             // Success - notify parent and dismiss
                             onChanged?.invoke()
@@ -519,20 +754,17 @@ class EditVpnBottomSheet : BottomSheetDialogFragment() {
 
     companion object {
         fun newInstance(
-            entity: VpnConfigEntity,
+            entityInit: VpnConfigEntity,
             repository: VpnConfigRepository,
             cryptoManager: CryptoManager,
             vpnStateManager: VpnStateManager,
-            nameValidator: (String) -> String?,
             onChanged: () -> Unit,
             onToggle: (Boolean) -> Unit
         ): EditVpnBottomSheet {
-            return EditVpnBottomSheet().apply {
-                this.entry = entity
+            return EditVpnBottomSheet(entityInit).apply {
                 this.repository = repository
                 this.cryptoManager = cryptoManager
                 this.vpnStateManager = vpnStateManager
-                this.nameValidator = nameValidator
                 this.onChanged = onChanged
                 this.onToggle = onToggle
             }

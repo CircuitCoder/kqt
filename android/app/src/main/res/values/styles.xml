@@ -13,5 +13,10 @@
         <item name="cornerSizeTopLeft">4dp</item>
         <item name="cornerSizeBottomLeft">4dp</item>
     </style>
+
+    <style name="TextAppearance.Kqt.Toolbar.Title" parent="TextAppearance.Material3.TitleLarge">
+        <item name="android:fontFamily">sans-serif-black</item>
+        <item name="fontWeight">900</item>
+    </style>
 </resources>
 
