@@ -128,6 +128,7 @@ class VpnBackendBridge(
             val runtime = getRuntime()
 
             // Convert MTU to UShort
+            // TODO: actually gets device MTU
             val mtuUShort = vpnConfig.mtu.toUShort()
 
             val backendHandle = parsedConfig.start(runtime, tunFd, mtuUShort)
@@ -148,10 +149,7 @@ class VpnBackendBridge(
                                 Log.i(TAG, "Backend completed")
 
                                 // Backend finished, terminate VPN if not already terminated
-                                if (!vpnInstance.isTerminated) {
-                                    Log.i(TAG, "Backend completed, stopping VPN")
-                                    vpnInstance.stop()
-                                }
+                                vpnInstance.notifyTermination(VpnInstance.TerminationReason.ServiceRevoked)
 
                                 VpnTerminationResult.BackendTerminated
                             } catch (e: Exception) {
