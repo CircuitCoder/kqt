@@ -271,9 +271,19 @@ pub async fn run(
         cancel.spawn(handle_server(endpoint, engine.clone(), cancel.clone()));
     }
 
-    cancel
+    let ret = cancel
         .spawn(main_loop(device, engine, cfg.mode, iface))
         .await?;
+
+    // Main loop dies, tear down everything
+    cancel.cancel();
+    if let Some(e) = ret {
+        // If the main loop voluntarily shuts down
+        match e {
+            Ok(o) => match o {}
+            Err(e) => return Err(e),
+        }
+    }
     Ok(())
 }
 
@@ -282,7 +292,7 @@ async fn main_loop(
     engine: Engine,
     mode: Mode,
     _iface: IfaceSetup,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<!> {
     // Main loop
     let mut buf = Vec::new();
     loop {
