@@ -1,5 +1,6 @@
 package plus.meow.kqt.vpn
 
+import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.VpnService
 import android.os.Binder
@@ -13,6 +14,7 @@ import plus.meow.kqt.utils.Result
  * This service manages the actual VPN connection and communicates with
  * the VpnManager to coordinate VPN instance lifecycle.
  */
+@SuppressLint("VpnServicePolicy")
 class KqtVpnService : VpnService() {
 
     private val binder = LocalBinder()
@@ -23,6 +25,10 @@ class KqtVpnService : VpnService() {
     }
 
     override fun onBind(intent: Intent?): IBinder {
+        if (intent != null && SERVICE_INTERFACE == intent.action) {
+            // Crucial: Let the VpnService return its internal Binder so onRevoke works
+            return super.onBind(intent) ?: binder
+        }
         return binder
     }
 

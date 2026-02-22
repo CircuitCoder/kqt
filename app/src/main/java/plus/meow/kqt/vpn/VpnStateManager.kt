@@ -267,7 +267,7 @@ class VpnStateManager(
 
                 Log.i(TAG, "VPN connection established for ${vpn.id}")
                 val ret = handle.terminationJob.await()
-                Log.i(TAG, "VPN ${vpn.id}: ${ret.toString()}")
+                Log.i(TAG, "VPN termination ${vpn.id}: ${ret.toString()}")
             } catch (e: Exception) {
                 Log.e(TAG, "Unexpected error during VPN connection: ${e.message}", e)
             } finally {

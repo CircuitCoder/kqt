@@ -616,11 +616,12 @@ class EditVpnBottomSheet(entityInit: VpnConfigEntity) : BottomSheetDialogFragmen
             suffix = "SUFFIX"
             keypair = "s.EXAMPLE_KEYPAIR"
             
-            mtu = 1400
             address = "LOCAL_INTERNAL_ADDR"
-            
+            mtu = 1400
             mode = "L3"
             
+            table = true
+
             [[route]]
             to = "0.0.0.0/0"
             via = "REMOTE_INTERNAL_ADDR"

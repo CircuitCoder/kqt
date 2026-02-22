@@ -50,9 +50,7 @@ class VpnInstance internal constructor(
      * This initiates the termination process.
      */
     fun stop() {
-        if (!isTerminated) {
-            notifyTermination(TerminationReason.UserRequested)
-        }
+        notifyTermination(TerminationReason.UserRequested)
     }
 
     /**
