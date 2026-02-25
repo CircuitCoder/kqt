@@ -280,7 +280,7 @@ pub async fn run(
     if let Some(e) = ret {
         // If the main loop voluntarily shuts down
         match e {
-            Ok(o) => match o {}
+            Ok(o) => match o {},
             Err(e) => return Err(e),
         }
     }
